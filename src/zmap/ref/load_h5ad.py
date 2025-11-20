@@ -198,6 +198,19 @@ def download_zmap_h5ad(
     )
     return dest_path
 
+def preprocess_tpmlog(adata: ad.AnnData):
+    """
+    Add a 'tpm_log' layer if missing but 'raw_nolog' exists.
+
+    Performs standard TPM normalization and log1p transform.
+    """
+    if "raw_nolog" in adata.layers and "tpm_log" not in adata.layers:
+        print("[ZMAP] Computing 'tpm_log' from 'raw_nolog' (normalize + log1p)")
+        adata.X = adata.layers["raw_nolog"].copy()
+        sc.pp.normalize_total(adata, target_sum=1e6, inplace=True)
+        sc.pp.log1p(adata)
+        adata.layers["tpm_log"] = adata.X.copy()
+        del adata.X
 
 def load_zmap_h5ad(
     *,
@@ -211,19 +224,15 @@ def load_zmap_h5ad(
     backed: bool | str = False,
     chunk_size: int = 1 << 20,
     show_progress: bool = True,
+    preprocess_tpmlog: bool = True,
 ) -> ad.AnnData:
     """
     High-level loader for ZMAP H5ADs.
 
     Examples
     --------
-    # 1. Load default slim / symphony reference (and cache to ./zmap/h5ads)
     adata = load_zmap_h5ad(kind="symphony")
-
-    # 2. Load raw counts version
     adata_raw = load_zmap_h5ad(kind="raw")
-
-    # 3. Load from a custom URL, writing to ./zmap/h5ads/custom.h5ad
     adata_custom = load_zmap_h5ad(
         url="https://.../my_custom.h5ad", filename="my_custom.h5ad"
     )
@@ -237,7 +246,9 @@ def load_zmap_h5ad(
     if use_cache and cache_key in _H5AD_CACHE:
         return _H5AD_CACHE[cache_key]
 
-    # Download (or reuse existing file)
+    # ----------------------------------------------------------------------
+    # Download or reuse existing file
+    # ----------------------------------------------------------------------
     path = download_zmap_h5ad(
         kind=kind,
         url=url,
@@ -249,7 +260,9 @@ def load_zmap_h5ad(
         show_progress=show_progress,
     )
 
+    # ----------------------------------------------------------------------
     # Load
+    # ----------------------------------------------------------------------
     if backed:
         backed_mode = "r" if backed is True else backed
         print(f"[ZMAP] Loading (backed={backed_mode!r}) from {path}")
@@ -258,7 +271,15 @@ def load_zmap_h5ad(
         print(f"[ZMAP] Loading into memory from {path}")
         adata = ad.read_h5ad(path)
 
+    # ----------------------------------------------------------------------
+    # Optional preprocessing step
+    # ----------------------------------------------------------------------
+    if preprocess_tpmlog and not backed:
+        preprocess_tpmlog(adata)
+
+    # ----------------------------------------------------------------------
     # Clean up if we didn't want a persistent copy
+    # ----------------------------------------------------------------------
     if not write_to_disk:
         try:
             os.unlink(path)
@@ -269,3 +290,10 @@ def load_zmap_h5ad(
         _H5AD_CACHE[cache_key] = adata
 
     return adata
+
+
+# ----------------------------------------------------------------------
+# Helper function
+# ----------------------------------------------------------------------
+
+
