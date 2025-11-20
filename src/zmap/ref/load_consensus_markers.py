@@ -188,7 +188,7 @@ def _df_to_panel(df: pd.DataFrame, group_col: str, gene_col: str) -> pd.DataFram
 # Main public API
 # ---------------------------------------------------------------------
 
-def get_consensus_markers(
+def load_consensus_markers(
     level: Literal["Tissue", "CellType", "Cluster", "Leiden100"] = "CellType",
     *,
     groups: Optional[Sequence[str]] = None,
