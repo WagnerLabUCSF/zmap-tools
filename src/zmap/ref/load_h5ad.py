@@ -14,18 +14,18 @@ from tqdm import tqdm
 H5AD_SOURCES = {
     # Raw counts
     "raw": {
-        "url": "https://.../ZMAP_YYYYMMDD_raw.h5ad",
-        "filename": "ZMAP_raw.h5ad",
+        "url": "https://pub-dbadc2c623224cb58d93cfa3b950fef5.r2.dev/h5ad/ZMAP_250402_raw.h5ad",
+        "filename": "ZMAP_250402_raw.h5ad",
     },
     # Fully processed (large)
     "processed": {
-        "url": "https://.../ZMAP_YYYYMMDD_processed.h5ad",
-        "filename": "ZMAP_processed.h5ad",
+        "url": "https://pub-dbadc2c623224cb58d93cfa3b950fef5.r2.dev/h5ad/ZMAP_251008_processed.h5ad",
+        "filename": "ZMAP_251008_processed.h5ad",
     },
     # Fully processed for plotting only (slim)
     "processed-slim": {
         "url": "https://.../ZMAP_YYYYMMDD_processed_slim.h5ad",
-        "filename": "ZMAP_processed.h5ad",
+        "filename": "ZMAP_YYYYMMDD_processed_slim.h5ad",
     },
     # Processed slim / symphony reference
     "symphony": {
