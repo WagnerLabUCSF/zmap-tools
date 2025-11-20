@@ -23,9 +23,9 @@ H5AD_SOURCES = {
         "filename": "ZMAP_251008_processed.h5ad",
     },
     # Fully processed for plotting only (slim)
-    "processed-slim": {
-        "url": "https://.../ZMAP_YYYYMMDD_processed_slim.h5ad",
-        "filename": "ZMAP_YYYYMMDD_processed_slim.h5ad",
+    "processed_slim": {
+        "url": "https://pub-dbadc2c623224cb58d93cfa3b950fef5.r2.dev/h5ad/ZMAP_251008_processed_slim.h5ad",
+        "filename": "ZMAP_251008_processed_slim.h5ad",
     },
     # Processed slim / symphony reference
     "symphony": {
@@ -201,7 +201,7 @@ def download_zmap_h5ad(
 
 def load_zmap_h5ad(
     *,
-    kind: str | None = "symphony",
+    kind: str | None = "processed_slim",
     url: str | None = None,
     dest_dir: str | os.PathLike | None = None,
     filename: str | None = None,
@@ -218,7 +218,7 @@ def load_zmap_h5ad(
     Examples
     --------
     # 1. Load default slim / symphony reference (and cache to ./zmap/h5ads)
-    adata = load_zmap_h5ad(kind="processed_slim")
+    adata = load_zmap_h5ad(kind="symphony")
 
     # 2. Load raw counts version
     adata_raw = load_zmap_h5ad(kind="raw")
