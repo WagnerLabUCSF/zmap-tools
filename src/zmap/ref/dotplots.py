@@ -120,6 +120,61 @@ def _extract_gene_vector(X, var_names, gene: str) -> np.ndarray:
     return col
 
 
+def _extract_color_vector(
+    adata,
+    color: str,
+    layer: str | None,
+    use_raw: bool | None,
+) -> tuple[np.ndarray, str]:
+    """
+    Resolve `color` (typically a gene) to a per-cell vector.
+
+    Resolution order:
+    1) Gene in X/raw/layer (via `_select_matrix_and_var_names`).
+    2) Numeric column in `adata.obs`.
+
+    Parameters
+    ----------
+    adata
+        AnnData object.
+    color
+        Key describing what to plot. Usually a gene name, but can also
+        be a numeric `adata.obs` column.
+    layer, use_raw
+        Same semantics as in the dotplot functions.
+
+    Returns
+    -------
+    vec : np.ndarray
+        1D array of length n_obs with values used for color & size.
+    source : {"gene", "obs"}
+        Where the values came from.
+    """
+    from pandas.api.types import is_numeric_dtype
+
+    color = str(color)
+
+    # Try gene in X/raw/layer
+    X, var_names = _select_matrix_and_var_names(adata, layer, use_raw)
+    if color in var_names:
+        vec = _extract_gene_vector(X, var_names, color)
+        return vec, "gene"
+
+    # Try numeric obs column
+    if color in adata.obs.columns:
+        s = adata.obs[color]
+        if not is_numeric_dtype(s):
+            raise ValueError(
+                f"Color key '{color}' found in adata.obs, but dtype is not numeric."
+            )
+        vec = pd.to_numeric(s, errors="coerce").to_numpy()
+        return vec, "obs"
+
+    raise ValueError(
+        f"Color key '{color}' not found as gene (var_names/raw/layer) or numeric adata.obs column."
+    )
+
+
 def _scale01(vec: np.ndarray) -> np.ndarray:
     """
     In-place scale of finite entries in `vec` to [0, 1].
@@ -427,12 +482,12 @@ def _add_row_color_legend(
 
 
 # ---------------------------------------------------------------------
-# 1) Dotplot: gene over time
+# 1) Dotplot: color feature over time
 # ---------------------------------------------------------------------
 
 def plot_dotplot_gene_over_time(
     adata,
-    gene: str,
+    color: str,
     *,
     groupby: str = "ZMAP_CellType",
     time_col: str = "time_block_id",
@@ -473,7 +528,7 @@ def plot_dotplot_gene_over_time(
     # ===== ordering & filtering =====
     cluster_order: list[str] | None = DEFAULT_CLUSTER_ORDER_ZMAP_CellType,
     time_order: list[str] | None = None,
-    omit_groups: list[str] | None = ['nan','unknown'],
+    omit_groups: list[str] | None = ['nan', 'unknown'],
     # ===== cosmetics =====
     edgecolor: str = "black",
     edge_lw: float = 0.1,
@@ -495,43 +550,21 @@ def plot_dotplot_gene_over_time(
     return_long: bool = False,
 ):
     """
-    Stable-layout dotplot of a single gene across (cluster × timepoint).
+    Stable-layout dotplot of a single color feature across (cluster × timepoint).
+
+    `color` is usually a gene name (taken from raw/layer/X), but if no gene
+    match is found it will fall back to a numeric column in `adata.obs`.
 
     Dot semantics
     -------------
-    * Color: mean expression per (cluster, time) bin.
-    * Size:  fraction of cells expressing (> detect_threshold).
+    * Color: mean value per (cluster, time) bin.
+    * Size:  fraction of cells with value > `detect_threshold`.
     * Low-support / missing: grey at minimum size.
-
-    Scaling semantics
-    -----------------
-    `standard_scale` controls how mean expression is re-scaled to [0, 1]
-    BEFORE mapping to the colormap:
-
-    * None
-        Use absolute mean expression across all bins.
-    * "time"
-        For each cluster (row), scale values across timepoints (columns)
-        independently to [0, 1] (row-wise scaling).
-    * "cluster"
-        For each timepoint (column), scale values across clusters (rows)
-        independently to [0, 1] (column-wise scaling).
-
-    Returns
-    -------
-    ax : matplotlib.axes.Axes
-        Dotplot axis.
-    long_out : pandas.DataFrame or None
-        Long-format summary table if `return_long=True`, else None.
     """
-    # ------------------------ pick matrix & var names ------------------------
-    X, var_names = _select_matrix_and_var_names(adata, layer, use_raw)
-    gene = str(gene)
-    if gene not in var_names:
-        raise ValueError(
-            f"Gene '{gene}' not found in adata (layer={layer}, use_raw={use_raw})."
-        )
-    x = _extract_gene_vector(X, var_names, gene)
+    color = str(color)
+
+    # ------------------------ color vector ------------------------
+    x, color_source = _extract_color_vector(adata, color, layer, use_raw)
 
     # ------------------------ metadata as arrays (no full copy) --------------
     obs = adata.obs
@@ -715,7 +748,7 @@ def plot_dotplot_gene_over_time(
     )
 
     _style_axes_spines(ax)
-    ax.set_title(gene if title is None else title, fontsize=12)
+    ax.set_title(color if title is None else title, fontsize=12)
 
     # ------------------------ colorbar (figure-anchored) ---------------------
     if add_colorbar:
@@ -793,12 +826,12 @@ def plot_dotplot_gene_over_time(
 
 
 # ---------------------------------------------------------------------
-# 2) Dotplot: gene over studies
+# 2) Dotplot: color feature over studies
 # ---------------------------------------------------------------------
 
 def plot_dotplot_gene_over_studies(
     adata,
-    gene: str,
+    color: str,
     *,
     groupby: str = "ZMAP_CellType",       # cluster column in .obs
     study_col: str = "study_id",          # study column in .obs (x-axis)
@@ -828,7 +861,7 @@ def plot_dotplot_gene_over_studies(
     gutter_pad: float = 0.03,             # extra right-side pad (in figure coords)
     figsize: tuple | None = None,         # if None, computed from grid + gutter
     xlabel_rotation: int = 90,
-    title: str | None = None,             # defaults to gene name only
+    title: str | None = None,             # defaults to color name only
     add_colorbar: bool = True,
     cbar_title: str = "log(tpm)\ncounts",
     # ===== size legend =====
@@ -839,7 +872,7 @@ def plot_dotplot_gene_over_studies(
     # ===== ordering & filtering =====
     cluster_order: list[str] | None = DEFAULT_CLUSTER_ORDER_ZMAP_CellType,
     study_order: list[str] | None = DEFAULT_STUDY_ORDER_ZMAP_CellType,
-    omit_groups: list[str] | None = ['nan','unknown'],     # omits clusters
+    omit_groups: list[str] | None = ['nan', 'unknown'],     # omits clusters
     # ===== cosmetics =====
     edgecolor: str = "black",
     edge_lw: float = 0.1,
@@ -861,43 +894,21 @@ def plot_dotplot_gene_over_studies(
     return_long: bool = False,
 ):
     """
-    Stable-layout dotplot of a single gene across (cluster × study).
+    Stable-layout dotplot of a single color feature across (cluster × study).
+
+    `color` is usually a gene name (taken from raw/layer/X), but if no gene
+    match is found it will fall back to a numeric column in `adata.obs`.
 
     Dot semantics
     -------------
-    * Color: mean expression per (cluster, study) bin.
-    * Size:  fraction of cells expressing (> detect_threshold).
+    * Color: mean value per (cluster, study) bin.
+    * Size:  fraction of cells with value > `detect_threshold`.
     * Low-support / missing: grey at minimum size.
-
-    Scaling semantics
-    -----------------
-    `standard_scale` controls how mean expression is re-scaled to [0, 1]
-    BEFORE mapping to the colormap:
-
-    * None
-        Use absolute mean expression across all bins.
-    * "study"
-        For each cluster (row), scale values across studies (columns)
-        independently to [0, 1] (row-wise scaling).
-    * "cluster"
-        For each study (column), scale values across clusters (rows)
-        independently to [0, 1] (column-wise scaling).
-
-    Returns
-    -------
-    ax : matplotlib.axes.Axes
-        Dotplot axis.
-    long_out : pandas.DataFrame or None
-        Long-format summary table if `return_long=True`, else None.
     """
-    # ------------------------ pick matrix & var names ------------------------
-    X, var_names = _select_matrix_and_var_names(adata, layer, use_raw)
-    gene = str(gene)
-    if gene not in var_names:
-        raise ValueError(
-            f"Gene '{gene}' not found in adata (layer={layer}, use_raw={use_raw})."
-        )
-    x = _extract_gene_vector(X, var_names, gene)
+    color = str(color)
+
+    # ------------------------ color vector ------------------------
+    x, color_source = _extract_color_vector(adata, color, layer, use_raw)
 
     # ------------------------ metadata as arrays (no full copy) --------------
     obs = adata.obs
@@ -1082,7 +1093,7 @@ def plot_dotplot_gene_over_studies(
     )
 
     _style_axes_spines(ax)
-    ax.set_title(gene if title is None else title, fontsize=12)
+    ax.set_title(color if title is None else title, fontsize=12)
 
     # ------------------------ colorbar (figure-anchored) ---------------------
     if add_colorbar:
@@ -1165,7 +1176,7 @@ def plot_dotplot_gene_over_studies(
 
 def plot_dotplot_gene_time_and_studies(
     adata,
-    gene: str,
+    color: str,
     *,
     # shared metadata
     groupby: str = "ZMAP_CellType",
@@ -1209,7 +1220,7 @@ def plot_dotplot_gene_time_and_studies(
     cluster_order: list[str] | None = DEFAULT_CLUSTER_ORDER_ZMAP_CellType,
     time_order: list[str] | None = None,
     study_order: list[str] | None = DEFAULT_STUDY_ORDER_ZMAP_CellType,
-    omit_groups: list[str] | None = ['nan','unknown'],
+    omit_groups: list[str] | None = ['nan', 'unknown'],
     # ===== cosmetics =====
     edgecolor: str = "black",
     edge_lw: float = 0.1,
@@ -1232,8 +1243,11 @@ def plot_dotplot_gene_time_and_studies(
     return_long: bool = False,
 ):
     """
-    Two-panel dotplot of a single gene across both (cluster × time) and
-    (cluster × study), sharing the same color scale and size mapping.
+    Two-panel dotplot of a single color feature across both (cluster × time)
+    and (cluster × study), sharing the same color scale and size mapping.
+
+    `color` is usually a gene name (taken from raw/layer/X), but if no gene
+    match is found it will fall back to a numeric column in `adata.obs`.
 
     Left panel:
         rows = clusters, columns = timepoints.
@@ -1242,31 +1256,14 @@ def plot_dotplot_gene_time_and_studies(
 
     Dot semantics (both panels)
     ---------------------------
-    * Color: mean expression per bin.
-    * Size:  fraction of cells expressing (> detect_threshold).
+    * Color: mean value per bin.
+    * Size:  fraction of cells with value > `detect_threshold`.
     * Low-support / missing: grey at minimum size.
-
-    Layout note
-    -----------
-    This function uses a specialized layout (cell-based width accounting,
-    middle spacer, shared gutter) that is intentionally different from the
-    single-panel dotplots.
-
-    Returns
-    -------
-    (ax_left, ax_right) : tuple[matplotlib.axes.Axes, matplotlib.axes.Axes]
-        Axes for the time and study panels.
-    (long_time, long_study) : tuple[pandas.DataFrame | None, pandas.DataFrame | None]
-        Long-format summaries for each panel if `return_long=True`, else (None, None).
     """
-    # ------------------------ pick matrix & var names ------------------------
-    X, var_names = _select_matrix_and_var_names(adata, layer, use_raw)
-    gene = str(gene)
-    if gene not in var_names:
-        raise ValueError(
-            f"Gene '{gene}' not found in adata (layer={layer}, use_raw={use_raw})."
-        )
-    x_full = _extract_gene_vector(X, var_names, gene)
+    color = str(color)
+
+    # ------------------------ color vector ------------------------
+    x_full, color_source = _extract_color_vector(adata, color, layer, use_raw)
 
     obs = adata.obs
     if groupby not in obs or time_col not in obs or study_col not in obs:
@@ -1533,7 +1530,7 @@ def plot_dotplot_gene_time_and_studies(
     if title_right:
         ax_right.set_title(f"{title_right}", fontsize=8)
 
-    # ------------------------ SHARED colorbar in gutter + rotated gene label -
+    # ------------------------ SHARED colorbar in gutter + rotated label -----
     if add_colorbar:
         left_cb = 1.0 - gutter_pad - 0.12
         bottom_cb = 0.70
@@ -1550,12 +1547,12 @@ def plot_dotplot_gene_time_and_studies(
             title=cbar_title,
         )
 
-        # Rotated gene name: centered vertically, to the LEFT of the colorbar
+        # Rotated label: centered vertically, to the LEFT of the colorbar
         gene_pad = 0.025  # horizontal spacing from cbar
         fig.text(
             left_cb - gene_pad,
             bottom_cb + height_cb / 2.0,
-            gene,
+            color,
             rotation=90,
             rotation_mode="anchor",
             va="center",
