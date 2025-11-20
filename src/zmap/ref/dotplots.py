@@ -491,7 +491,7 @@ def plot_dotplot_gene_over_time(
     *,
     groupby: str = "ZMAP_CellType",
     time_col: str = "time_block_id",
-    layer: str | None = None,
+    layer: str | None = "tpm_log",
     use_raw: bool | None = None,
     detect_threshold: float = 0.0,
     show: bool = True,
@@ -835,7 +835,7 @@ def plot_dotplot_gene_over_studies(
     *,
     groupby: str = "ZMAP_CellType",       # cluster column in .obs
     study_col: str = "study_id",          # study column in .obs (x-axis)
-    layer: str | None = None,
+    layer: str | None = "tpm_log",
     use_raw: bool | None = None,
     detect_threshold: float = 0.0,        # > threshold => “expressing”
     show: bool = True,
@@ -1182,7 +1182,7 @@ def plot_dotplot_gene_time_and_studies(
     groupby: str = "ZMAP_CellType",
     time_col: str = "time_group_id",
     study_col: str = "study_id",
-    layer: str | None = None,
+    layer: str | None = "tpm_log",
     use_raw: bool | None = None,
     detect_threshold: float = 0.0,
     show: bool = True,
