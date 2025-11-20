@@ -224,7 +224,7 @@ def load_zmap_h5ad(
     backed: bool | str = False,
     chunk_size: int = 1 << 20,
     show_progress: bool = True,
-    preprocess_tpmlog: bool = True,
+    attempt_preprocess_tpmlog: bool = True,
 ) -> ad.AnnData:
     """
     High-level loader for ZMAP H5ADs.
@@ -274,7 +274,7 @@ def load_zmap_h5ad(
     # ----------------------------------------------------------------------
     # Optional preprocessing step
     # ----------------------------------------------------------------------
-    if preprocess_tpmlog and not backed:
+    if attempt_preprocess_tpmlog and not backed:
         preprocess_tpmlog(adata)
 
     # ----------------------------------------------------------------------
