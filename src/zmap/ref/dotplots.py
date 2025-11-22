@@ -5,7 +5,7 @@ import matplotlib as mpl
 
 
 # ---------------------------------------------------------------------
-# ZMAP_CellType Orderings & Colors
+# Group orderings & colors
 # ---------------------------------------------------------------------
 
 DEFAULT_CLUSTER_ORDER_ZMAP_CellType = [
@@ -30,8 +30,7 @@ DEFAULT_CLUSTER_ORDER_ZMAP_CellType = [
     "hematopoietic_progenitor", "erythroid", "myeloid_progenitor",
     "macrophage", "neutrophil",
     "notochord", "prechordal_plate", "hatching_gland",
-    "primordial_germ_cell",
-]
+    "primordial_germ_cell"]
 
 DEFAULT_ROW_COLOR_GROUPS_ZMAP_CellType = {
     "black":      ["blastomeres"],
@@ -79,10 +78,8 @@ DEFAULT_ROW_COLOR_GROUPS_ZMAP_CellType = {
 
 DEFAULT_ROW_DIVIDERS_ZMAP_CellType = [1, 11, 18, 24, 32, 36, 50, 64, 69, 74, 77]
 
-DEFAULT_STUDY_ORDER_ZMAP_CellType = [
-    "Kamimoto2023", "Farrell2018", "Kukreja2024", "Wagner2018",
-    "Farnsworth2020", "Lange2023", "Sur2023", "Spanjaard2018",
-]
+DEFAULT_STUDY_ORDER = ["Kamimoto2023", "Farrell2018", "Kukreja2024", "Wagner2018",
+"Farnsworth2020", "Lange2023", "Sur2023", "Spanjaard2018"]
 
 
 # ---------------------------------------------------------------------
@@ -871,7 +868,7 @@ def plot_dotplot_gene_over_studies(
     size_legend_facecolor: str = "black",
     # ===== ordering & filtering =====
     cluster_order: list[str] | None = DEFAULT_CLUSTER_ORDER_ZMAP_CellType,
-    study_order: list[str] | None = DEFAULT_STUDY_ORDER_ZMAP_CellType,
+    study_order: list[str] | None = DEFAULT_STUDY_ORDER,
     omit_groups: list[str] | None = ['nan', 'unknown'],     # omits clusters
     # ===== cosmetics =====
     edgecolor: str = "black",
@@ -1219,7 +1216,7 @@ def plot_dotplot_gene_time_and_studies(
     # ===== ordering & filtering =====
     cluster_order: list[str] | None = DEFAULT_CLUSTER_ORDER_ZMAP_CellType,
     time_order: list[str] | None = None,
-    study_order: list[str] | None = DEFAULT_STUDY_ORDER_ZMAP_CellType,
+    study_order: list[str] | None = DEFAULT_STUDY_ORDER,
     omit_groups: list[str] | None = ['nan', 'unknown'],
     # ===== cosmetics =====
     edgecolor: str = "black",
