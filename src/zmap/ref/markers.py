@@ -14,10 +14,11 @@ import requests
 # ---------------------------------------------------------------------
 
 _MARKER_URLS: Dict[str, str] = {
-    "Tissue":    "https://pub-dbadc2c623224cb58d93cfa3b950fef5.r2.dev/csv/consensus_markers/ZMAP_Tissue_consensus_report.csv.zip",
-    "CellType":  "https://pub-dbadc2c623224cb58d93cfa3b950fef5.r2.dev/csv/consensus_markers/ZMAP_CellType_consensus_report.csv.zip",
-    "Cluster":   "https://pub-dbadc2c623224cb58d93cfa3b950fef5.r2.dev/csv/consensus_markers/ZMAP_Cluster_consensus_report.csv.zip",
-    "Leiden100": "https://pub-dbadc2c623224cb58d93cfa3b950fef5.r2.dev/csv/consensus_markers/ZMAP_leiden100_consensus_report.csv.zip",
+    "Tissue":           "https://pub-dbadc2c623224cb58d93cfa3b950fef5.r2.dev/csv/consensus_markers/ZMAP_Tissue_consensus_report.csv.zip",
+    "CellType":         "https://pub-dbadc2c623224cb58d93cfa3b950fef5.r2.dev/csv/consensus_markers/ZMAP_CellType_consensus_report.csv.zip",
+    "CellTypeFine":     "https://pub-dbadc2c623224cb58d93cfa3b950fef5.r2.dev/csv/consensus_markers/ZMAP_CellTypeFine_consensus_report.csv.zip",
+    "Cluster":          "https://pub-dbadc2c623224cb58d93cfa3b950fef5.r2.dev/csv/consensus_markers/ZMAP_Cluster_consensus_report.csv.zip",
+    "Leiden100":        "https://pub-dbadc2c623224cb58d93cfa3b950fef5.r2.dev/csv/consensus_markers/ZMAP_leiden100_consensus_report.csv.zip",
 }
 
 # ---------------------------------------------------------------------
