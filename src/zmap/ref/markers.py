@@ -194,7 +194,7 @@ def load_consensus_markers(
     level: Literal["Tissue", "CellType", "Cluster", "Leiden100"] = "CellType",
     *,
     groups: Optional[Sequence[str]] = None,
-    marker_type: Literal["exclusivity", "contrast", "consensus", "overall"] = "exclusivity",
+    marker_type: Literal["specificity", "contrast", "consensus", "overall"] = "overall",
     n_per_group: Optional[int] = 50,
     min_support_ratio: Optional[float] = None,
     min_log2fc: Optional[float] = None,
@@ -216,7 +216,7 @@ def load_consensus_markers(
     marker_type
         Which ranking column to use when selecting top markers:
 
-        - "exclusivity" -> use 'rank_exclusivity'
+        - "specificity" -> use 'rank_specificity'
         - "contrast"    -> use 'rank_contrast'
         - "consensus"   -> use 'rank_consensus'
         - "overall"     -> use 'overall_rank'
@@ -283,7 +283,7 @@ def load_consensus_markers(
 
     # Choose ranking column
     marker_to_col = {
-        "exclusivity": "rank_exclusivity",
+        "specificity": "rank_specificity",
         "contrast": "rank_contrast",
         "consensus": "rank_consensus",
         "overall": "overall_rank",
