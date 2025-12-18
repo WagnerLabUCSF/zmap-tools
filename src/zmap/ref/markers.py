@@ -194,7 +194,7 @@ def load_consensus_markers(
     level: Literal["Tissue", "CellType", "Cluster", "Leiden100"] = "CellType",
     *,
     groups: Optional[Sequence[str]] = None,
-    marker_type: Literal["specificity", "contrast", "consensus", "overall"] = "overall",
+    marker_type: Literal["specificity", "contrast", "consensus", "prevalence", "overall"] = "overall",
     n_per_group: Optional[int] = 50,
     min_support_ratio: Optional[float] = None,
     min_log2fc: Optional[float] = None,
@@ -219,6 +219,7 @@ def load_consensus_markers(
         - "specificity" -> use 'rank_specificity'
         - "contrast"    -> use 'rank_contrast'
         - "consensus"   -> use 'rank_consensus'
+        - "prevalence"   -> use 'rank_prevalence'
         - "overall"     -> use 'overall_rank'
 
     n_per_group
@@ -286,6 +287,7 @@ def load_consensus_markers(
         "specificity": "rank_specificity",
         "contrast": "rank_contrast",
         "consensus": "rank_consensus",
+        "prevalence": "rank_prevalence",
         "overall": "overall_rank",
     }
     rank_col = marker_to_col[marker_type]
