@@ -191,7 +191,7 @@ def _df_to_panel(df: pd.DataFrame, group_col: str, gene_col: str) -> pd.DataFram
 # ---------------------------------------------------------------------
 
 def load_consensus_markers(
-    level: Literal["Tissue", "CellType", "Cluster", "Leiden100"] = "CellType",
+    level: Literal["GermLayer","Tissue", "CellType", "Cluster", "Leiden100"] = "CellType",
     *,
     groups: Optional[Sequence[str]] = None,
     marker_type: Literal["specificity", "contrast", "consensus", "prevalence", "overall"] = "overall",
