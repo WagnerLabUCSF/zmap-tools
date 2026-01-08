@@ -8,12 +8,17 @@ try:
 except PackageNotFoundError:
     __version__ = "0.0.0"
 
-# Import subpackages so they become attributes on `zmap`
+# Import subpackages as attributes 
 from . import process      # zmap.process
-from . import ref          # zmap.ref
-from . import dev          # zmap.dev
+from . import reference    # zmap.reference
+from . import tools        # zmap.tools
+from . import dotplot      # zmap.dotplot
+from . import predict      # zmap.predict
 
-# Scanpy-style alias: zmap.pp -> zmap.process
+# Scanpy-style aliases: 
 pp = process
+ref = reference
+tl = tools
 
-__all__ = ["__version__", "process", "pp", "ref", "dev"]
+
+__all__ = ["__version__", "pp", "ref", "tl" ,"dotplot", "predict"]

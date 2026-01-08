@@ -19,17 +19,17 @@ H5AD_SOURCES = {
     },
     # Fully processed (large)
     "processed": {
-        "url": "https://pub-dbadc2c623224cb58d93cfa3b950fef5.r2.dev/h5ad/ZMAP_251008_processed.h5ad",
+        "url": "https://pub-dbadc2c623224cb58d93cfa3b950fef5.r2.dev/h5ad/ZMAP_251209_processed.h5ad",
         "filename": "ZMAP_251008_processed.h5ad",
     },
     # Fully processed for plotting only (slim)
     "processed_slim": {
-        "url": "https://pub-dbadc2c623224cb58d93cfa3b950fef5.r2.dev/h5ad/ZMAP_251008_processed_slim.h5ad",
+        "url": "https://pub-dbadc2c623224cb58d93cfa3b950fef5.r2.dev/h5ad/ZMAP_251209_processed_slim.h5ad",
         "filename": "ZMAP_251008_processed_slim.h5ad",
     },
     # Processed slim / symphony reference
     "symphony": {
-        "url": "https://pub-dbadc2c623224cb58d93cfa3b950fef5.r2.dev/h5ad/ZMAP_251016_symphony.h5ad",
+        "url": "https://pub-dbadc2c623224cb58d93cfa3b950fef5.r2.dev/h5ad/ZMAP_260103_symphony.h5ad",
         "filename": "ZMAP_251016_symphony.h5ad",
     },
 }
@@ -198,6 +198,7 @@ def download_zmap_h5ad(
     )
     return dest_path
 
+
 def preprocess_tpmlog(adata: ad.AnnData):
     """
     Add a 'tpm_log' layer if missing but 'raw_nolog' exists.
@@ -211,6 +212,7 @@ def preprocess_tpmlog(adata: ad.AnnData):
         sc.pp.log1p(adata)
         adata.layers["tpm_log"] = adata.X.copy()
         del adata.X
+
 
 def load_zmap_h5ad(
     *,

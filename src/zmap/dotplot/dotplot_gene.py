@@ -479,10 +479,10 @@ def _add_row_color_legend(
 
 
 # ---------------------------------------------------------------------
-# 1) Dotplot: color feature over time
+# 1) Dotplot: color feature vs time
 # ---------------------------------------------------------------------
 
-def plot_dotplot_gene_over_time(
+def gene_groups_vs_time(
     adata,
     color: str,
     *,
@@ -823,10 +823,10 @@ def plot_dotplot_gene_over_time(
 
 
 # ---------------------------------------------------------------------
-# 2) Dotplot: color feature over studies
+# 2) Dotplot: color feature vs studies
 # ---------------------------------------------------------------------
 
-def plot_dotplot_gene_over_studies(
+def gene_groups_vs_studies(
     adata,
     color: str,
     *,
@@ -1171,7 +1171,7 @@ def plot_dotplot_gene_over_studies(
 # 3) Combined dotplot: time and studies in one figure
 # ---------------------------------------------------------------------
 
-def plot_dotplot_gene_time_and_studies(
+def gene_groups_vs_time_and_studies(
     adata,
     color: str,
     *,
