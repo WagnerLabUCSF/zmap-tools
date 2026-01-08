@@ -1497,7 +1497,7 @@ def annotate_with_zmap(
     # -----------------------------
     if adata_ref is None:
         print(f"[ZMAP] Loading reference ({ref_kind})...")
-        from zmap.ref import load_zmap_h5ad
+        from zmap.reference import load_zmap_h5ad
         adata_ref = load_zmap_h5ad(kind=ref_kind)
         print("[ZMAP] Reference loaded.")
 
@@ -1577,6 +1577,9 @@ def annotate_with_zmap(
     # -----------------------------
     # 5. UMAP overlay figure
     # -----------------------------
+    adata_query.uns['ZMAP_CellType_colors'] = adata_ref.uns['ZMAP_CellType_colors'].copy()
+    adata_query.uns['ZMAP_Tissue_colors'] = adata_ref.uns['ZMAP_Tissue_colors'].copy()
+    adata_query.uns['ZMAP_GermLayer_colors'] = adata_ref.uns['ZMAP_GermLayer_colors'].copy()
     try:
         print("[ZMAP] Plotting UMAP overlay with predicted labels...")
         plot_embedding_with_ondata_labels(
