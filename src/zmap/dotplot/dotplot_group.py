@@ -603,7 +603,7 @@ def plot_dotplot_design_fullgrid(
     detect_threshold: float = 0.0,           # > threshold => “expressing”
     # ring settings
     support_col: str = "support_ratio",
-    add_support_ring: bool = False,
+    add_support_ring: bool = True,
     ring_min_lw: float = 0.02,
     ring_max_lw: float = 1.5,
     ring_color: str = "darkorange",
@@ -625,7 +625,7 @@ def plot_dotplot_design_fullgrid(
     xlabel_rotation: int = 90,
     title: str | None = None,
     add_colorbar: bool = True,
-    cbar_title: str = "Normalized\nexpression",
+    cbar_title: str = "log(tpm)\nCounts",
     cbar_title_fontsize: float = 8.0,
     cbar_ticklabel_fontsize: float = 8.0,
 
@@ -634,7 +634,7 @@ def plot_dotplot_design_fullgrid(
     size_legend_fracs: tuple = (0.1, 0.25, 0.5, 0.75, 1.0),
     size_legend_title: str = "Fraction\nexpressing",
     size_legend_loc: str = "upper left",
-    size_legend_bbox_to_anchor: tuple | None = None,
+    size_legend_bbox_to_anchor: tuple | None = (0.0, 0.7),
     size_legend_label_fmt: str = "{:.0%}",
     size_legend_facecolor: str = "black",
     size_legend_edgecolor: str = "black",
@@ -648,7 +648,7 @@ def plot_dotplot_design_fullgrid(
     ring_legend_fracs: tuple = (0, 0.5, 1.0),
     ring_legend_title: str = "Consensus\nsupport",
     ring_legend_loc: str = "lower left",
-    ring_legend_bbox_to_anchor: tuple | None = None,
+    ring_legend_bbox_to_anchor: tuple | None = (0.0, 0.25),
     ring_legend_label_fmt: str = "{:.0%}",
     ring_legend_title_fontsize: float = 8.0,
     ring_legend_label_fontsize: float = 8.0,
@@ -719,7 +719,7 @@ def plot_dotplot_design_fullgrid(
     # colorbar physical sizing
     cbar_width_pt: float = 12.0,
     cbar_height_frac: float = 0.90,  # relative to dotplot height
-    cbar_bbox_to_anchor: tuple | None = (1.02, 0.45), # ~vertically centered
+    cbar_bbox_to_anchor: tuple | None = (1.05, 0.85),
     # reserve right gutter for legends/colorbar
     right_gutter_frac: float = 0.82,
 
@@ -1471,7 +1471,7 @@ def group_siblings_vs_markers(
 
     # marker selection
     marker_type: Literal["overall", "exclusivity", "contrast", "consensus"] = "overall",
-    n_markers: int = 10,
+    n_markers: int = 20,
     min_support_ratio: float | None = None,
     min_log2fc: float | None = None,
     min_enrich: float | None = None,
@@ -1492,11 +1492,11 @@ def group_siblings_vs_markers(
     height_per_group: float = 0.2,
     min_figsize: tuple[float, float] = (0.5, 0.5),
     max_figsize: tuple[float, float] = (25.0, 25.0),
-    hspace: float = 0.08,
+    hspace: float = 0.04,
 
     # time strip & consensus
     left_time_strip: bool = False,
-    consensus_panel: str | None = "stacked_bar",
+    consensus_panel: str | None = None,
     show_size_legend: bool = True,
     xlabel_rotation: int = 90,
     duplicate_gene_columns: bool = False,
@@ -1967,7 +1967,7 @@ def group_descendants_vs_markers(
     standard_scale: Optional[str] = "var",
     detect_threshold: float = 0.0,
     cmap: str = "Blues",
-    consensus_panel: Optional[str] = "stacked_bar",
+    consensus_panel: Optional[str] = None,
     stacked_bar_show_legend: bool = True,
     group_color_dict: Optional[Mapping[str, str]] = None,
     duplicate_gene_columns: bool = True,
