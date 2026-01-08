@@ -168,7 +168,7 @@ def predict_labels_kNN(
     time_labels: str = 'time_id',
     n_neighbors: int = 25,
     metric: str = 'cosine',
-    omit_labels: list[str] | None = ['unknown','nan'],
+    omit_labels: list[str] | None = ['unknown','nan','unassigned'],
 
     # Balancing:
     class_balance: str | None = None,     # None | "global_inverse"
@@ -1621,3 +1621,4 @@ def annotate_with_zmap(
 
     print(f"[ZMAP] Annotation complete. Results stored under namespace '{space}'.")
     return adata_query
+
