@@ -1932,11 +1932,11 @@ def group_siblings_vs_markers(
 
 def group_descendants_vs_markers(
     adata: ad.AnnData,
-    parent: Optional[str] = None,                     # NEW: the selected parent group (e.g., a Tissue or CellType)
+    parent: Optional[str] = 'neurectoderm',                     # NEW: the selected parent group (e.g., a Tissue or CellType)
     *,
     # ---- Hierarchy columns (parent/child) ----
-    parent_col: str = "ZMAP_CellType",                # NEW: higher-level obs column (e.g., ZMAP_Tissue or ZMAP_CellType)
-    child_col: str = "ZMAP_Cluster",                  # NEW: lower-level obs column used for rows (e.g., ZMAP_Cluster or leiden_100)
+    parent_col: str = "ZMAP_GermLayer",                # NEW: higher-level obs column (e.g., ZMAP_Tissue or ZMAP_CellType)
+    child_col: str = "ZMAP_CellType",                  # NEW: lower-level obs column used for rows (e.g., ZMAP_Cluster or leiden_100)
 
     # ---- Back-compat aliases (deprecated) ----
     celltype: Optional[str] = None,                   # was the selected value at the parent level
@@ -1948,7 +1948,7 @@ def group_descendants_vs_markers(
     use_raw: Optional[bool] = None,
 
     # ---- marker loading ----
-    marker_type: Literal["exclusivity", "contrast", "consensus", "overall"] = "exclusivity",
+    marker_type: Literal["specificity", "contrast", "consensus", "overall"] = "overall",
     n_markers_per_group: Optional[int] = 5,
     min_support_ratio: Optional[float] = None,
     min_log2fc: Optional[float] = None,
@@ -1959,7 +1959,7 @@ def group_descendants_vs_markers(
     min_cells_per_group: Optional[int] = None,
 
     # ---- ordering / dendrogram ----
-    use_dendrogram_rows: bool = False,
+    use_dendrogram_rows: bool = True,
     dendrogram_metric: str = "correlation",
     dendrogram_method: str = "average",
 
@@ -1970,11 +1970,11 @@ def group_descendants_vs_markers(
     consensus_panel: Optional[str] = None,
     stacked_bar_show_legend: bool = True,
     group_color_dict: Optional[Mapping[str, str]] = None,
-    duplicate_gene_columns: bool = True,
+    duplicate_gene_columns: bool = False,
 
     # ---- figure size control ----
     figsize: Optional[Tuple[float, float]] = None,
-    min_figsize: Tuple[float, float] = (9.0, 4.5),
+    min_figsize: Tuple[float, float] = (10.0, 6.0),
     max_figsize: Tuple[float, float] = (80.0, 40.0),
     width_per_gene: float = 0.15,
     height_per_group: float = 0.15,
@@ -2176,6 +2176,8 @@ def group_descendants_vs_markers(
         group_color_dict=None if group_color_dict is None else dict(group_color_dict),
         duplicate_gene_columns=duplicate_gene_columns,
         show_size_legend=show_size_legend,
+        cbar_title='Normalized Expression',
+        cbar_bbox_to_anchor = (1.02, 0.85),
         **dotplot_kwargs,
     )
 
