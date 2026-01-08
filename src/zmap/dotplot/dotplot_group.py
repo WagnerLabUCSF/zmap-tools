@@ -21,7 +21,7 @@ from matplotlib.patches import Patch
 from scipy.cluster.hierarchy import linkage, leaves_list
 from scipy.spatial.distance import pdist
 
-from zmap.ref import load_consensus_markers
+from zmap.reference import load_consensus_markers
 
 # ---------------------------------------------------------------------
 # Level configuration (ontology levels and their parents)
