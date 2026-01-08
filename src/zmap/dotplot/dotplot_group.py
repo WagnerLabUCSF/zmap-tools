@@ -2176,7 +2176,6 @@ def group_descendants_vs_markers(
         group_color_dict=None if group_color_dict is None else dict(group_color_dict),
         duplicate_gene_columns=duplicate_gene_columns,
         show_size_legend=show_size_legend,
-        cbar_title='Normalized Expression',
         cbar_bbox_to_anchor = (1.02, 0.85),
         **dotplot_kwargs,
     )

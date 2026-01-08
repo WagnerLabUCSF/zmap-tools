@@ -8,75 +8,36 @@ import matplotlib as mpl
 # Group orderings & colors
 # ---------------------------------------------------------------------
 
-DEFAULT_CLUSTER_ORDER_ZMAP_CellType = [
-    "blastomeres",
-    "ectoderm", "epidermis", "fin_epidermis", "ionocytes", "lens",
-    "lateral_line", "olfactory", "otic", "periderm", "superficial_epidermis",
-    "endoderm", "pharyngeal_pouch", "forerunner_cells", "intestine", "liver",
-    "endocrine_pancreas", "exocrine_pancreas",
-    "neural_crest", "iridophore", "melanocyte", "xanthophore", "schwann",
-    "pharyngeal_arch_crest",
-    "neural", "telencephalon", "diencephalon", "mesencephalon",
-    "midbrain_hindbrain_boundary", "rhombocephalon", "spinal_cord", "neurons",
-    "optic_cup", "retinal_pigment_epithelium", "retina", "photoreceptors",
-    "mesoderm", "tailbud", "presomitic_meso", "adaxial", "myotome",
-    "slow_muscle", "fast_muscle", "somites", "dermatome", "dermis",
-    "fibroblasts", "sclerotome", "axial_skeleton", "tendon",
-    "lateral_plate", "cardiac_mesenchyme", "cardiac_muscle",
-    "vascular_smooth_muscle", "visceral_smooth_muscle", "cephalic_muscle",
-    "pharyngeal_arch_meso", "head_mesenchyme", "meninges", "periocular_meso",
-    "fin_bud", "fin_bud_chondrocytes", "facial_skeleton", "pronephros",
-    "vasculature", "vein", "endocardial", "aorta", "lymphatic",
-    "hematopoietic_progenitor", "erythroid", "myeloid_progenitor",
-    "macrophage", "neutrophil",
-    "notochord", "prechordal_plate", "hatching_gland",
-    "primordial_germ_cell"]
+DEFAULT_CLUSTER_ORDER_ZMAP_CellType = [    
+    'blastomeres', 
+    'ectoderm_progenitor', 'fin_epidermis', 'basal_epidermis', 'ionocytes', 'lens', 'lateral_line', 'olfactory', 'otic', 'periderm', 'superficial_epidermis',
+    'endoderm_progenitor', 'pharyngeal_pouch', 'forerunner_cells', 'intestinal_epithelium', 'hepatocyte', 'endocrine_pancreas', 'exocrine_pancreas', 
+    'neural_crest_progenitor','pharyngeal_arch_crest', 'iridophore', 'melanocyte', 'xanthophore', 'schwann', 
+    'neural_progenitor', 'telencephalon', 'diencephalon', 'mesencephalon', 'rhombocephalon', 'spinal_cord_progenitor', 'differentiating_neurons', 
+    'optic_cup', 'retinal_pigment_epithelium', 'retina', 'photoreceptors',
+    'mesoderm_progenitor', 'tailbud', 'presomitic_meso', 'adaxial', 'myotome', 'slow_muscle', 'fast_muscle', 'somites', 'dermatome', 'dermis', 'fibroblasts', 'sclerotome', 'axial_skeleton', 'tendon',
+    'lateral_plate_progenitor', 'pharyngeal_arch_meso', 'head_mesenchyme', 'meninges', 'periocular_meso', 'fin_bud_mesenchyme', 'fin_bud_chondrocytes', 'facial_skeleton', 'cephalic_muscle', 'visceral_smooth_muscle', 'vascular_smooth_muscle', 'cardiac_mesenchyme', 'cardiac_muscle', 'pronephros', 
+    'vasculature', 'vein', 'endocardial', 'aorta', 'lymphatic', 
+    'hematopoietic_progenitor', 'erythroid', 'myeloid_progenitor', 'macrophage', 'neutrophil', 
+    'notochord', 'prechordal_plate', 'hatching_gland', 
+    'pgc_progenitor']
 
 DEFAULT_ROW_COLOR_GROUPS_ZMAP_CellType = {
     "black":      ["blastomeres"],
-    "green":      [
-        "ectoderm", "epidermis", "fin_epidermis", "ionocytes",
-        "lens", "lateral_line", "olfactory", "otic",
-        "periderm", "superficial_epidermis",
-    ],
-    "darkorange": [
-        "endoderm", "pharyngeal_pouch", "forerunner_cells",
-        "intestine", "liver", "endocrine_pancreas", "exocrine_pancreas",
-    ],
-    "steelblue":  [
-        "neural_crest", "iridophore", "melanocyte", "xanthophore",
-        "schwann", "pharyngeal_arch_crest",
-    ],
-    "blue":       [
-        "neural", "telencephalon", "diencephalon", "mesencephalon",
-        "midbrain_hindbrain_boundary", "rhombocephalon",
-        "spinal_cord", "neurons",
-    ],
-    "darkblue":   [
-        "optic_cup", "retinal_pigment_epithelium", "retina", "photoreceptors",
-    ],
-    "red":        [
-        "mesoderm", "tailbud", "presomitic_meso", "adaxial", "myotome",
-        "slow_muscle", "fast_muscle", "somites", "dermatome", "dermis",
-        "fibroblasts", "sclerotome", "axial_skeleton", "tendon",
-    ],
-    "crimson":    [
-        "lateral_plate", "cardiac_mesenchyme", "cardiac_muscle",
-        "vascular_smooth_muscle", "visceral_smooth_muscle", "cephalic_muscle",
-        "pharyngeal_arch_meso", "head_mesenchyme", "meninges",
-        "periocular_meso", "fin_bud", "fin_bud_chondrocytes",
-        "facial_skeleton", "pronephros",
-    ],
-    "orangered":  ["vasculature", "vein", "endocardial", "aorta", "lymphatic"],
-    "firebrick":  [
-        "hematopoietic_progenitor", "erythroid",
-        "myeloid_progenitor", "macrophage", "neutrophil",
-    ],
-    "r":          ["notochord", "prechordal_plate", "hatching_gland"],
-    "purple":     ["primordial_germ_cell"],
+    "green":      ['ectoderm_progenitor', 'fin_epidermis', 'basal_epidermis', 'ionocytes', 'lens', 'lateral_line', 'olfactory', 'otic', 'periderm', 'superficial_epidermis'],
+    "darkorange": ['endoderm_progenitor', 'pharyngeal_pouch', 'forerunner_cells', 'intestinal_epithelium', 'hepatocyte', 'endocrine_pancreas', 'exocrine_pancreas'],
+    "steelblue":  ['neural_crest_progenitor','pharyngeal_arch_crest', 'iridophore', 'melanocyte', 'xanthophore', 'schwann'],
+    "blue":       ['neural_progenitor', 'telencephalon', 'diencephalon', 'mesencephalon', 'rhombocephalon', 'spinal_cord_progenitor', 'differentiating_neurons'],
+    "darkblue":   ['optic_cup', 'retinal_pigment_epithelium', 'retina', 'photoreceptors'],
+    "red":        ['mesoderm_progenitor', 'tailbud', 'presomitic_meso', 'adaxial', 'myotome', 'slow_muscle', 'fast_muscle', 'somites', 'dermatome', 'dermis', 'fibroblasts', 'sclerotome', 'axial_skeleton', 'tendon'],
+    "crimson":    ['lateral_plate_progenitor', 'pharyngeal_arch_meso', 'head_mesenchyme', 'meninges', 'periocular_meso', 'fin_bud_mesenchyme', 'fin_bud_chondrocytes', 'facial_skeleton', 'cephalic_muscle', 'visceral_smooth_muscle', 'vascular_smooth_muscle', 'cardiac_mesenchyme', 'cardiac_muscle', 'pronephros'],
+    "orangered":  ['vasculature', 'vein', 'endocardial', 'aorta', 'lymphatic'],
+    "firebrick":  ['hematopoietic_progenitor', 'erythroid', 'myeloid_progenitor', 'macrophage', 'neutrophil'],
+    "r":          ['notochord', 'prechordal_plate', 'hatching_gland', ],
+    "purple":     ["pgc_progenitor"],
 }
 
-DEFAULT_ROW_DIVIDERS_ZMAP_CellType = [1, 11, 18, 24, 32, 36, 50, 64, 69, 74, 77]
+DEFAULT_ROW_DIVIDERS_ZMAP_CellType = [1, 11, 18, 24, 31, 35, 49, 63, 68, 73, 76]
 
 DEFAULT_STUDY_ORDER = ["Kamimoto2023", "Farrell2018", "Kukreja2024", "Wagner2018",
 "Farnsworth2020", "Lange2023", "Sur2023", "Spanjaard2018"]
@@ -412,7 +373,7 @@ def _add_fraction_size_legend(
     leg_ax.axis("off")
 
     if size_legend_title is None:
-        size_legend_title = "fraction\nexpressing"
+        size_legend_title = "Fraction\nExpressing"
 
     leg_ax.text(
         0.02,
