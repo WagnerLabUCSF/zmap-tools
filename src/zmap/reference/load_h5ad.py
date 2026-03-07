@@ -207,10 +207,10 @@ def preprocess_tpmlog(adata: ad.AnnData):
     """
     if "raw_nolog" in adata.layers and "tpm_log" not in adata.layers:
         print("[ZMAP] Computing 'tpm_log' from 'raw_nolog' (normalize + log1p)")
-        adata.X = adata.layers["raw_nolog"].copy()
+        adata.X = adata.layers["raw_nolog"]
         sc.pp.normalize_total(adata, target_sum=1e6, inplace=True)
         sc.pp.log1p(adata)
-        adata.layers["tpm_log"] = adata.X.copy()
+        adata.layers["tpm_log"] = adata.X
         del adata.X
 
 
