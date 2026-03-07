@@ -28,8 +28,8 @@ H5AD_SOURCES = {
         "filename": "ZMAP_251209_processed_slim.h5ad",
     },
     # Fully processed but tpm counts only (best for plotting)
-    "processed_slim": {
-        "url": "",
+    "processed_slim_tpm": {
+        "url": "https://pub-dbadc2c623224cb58d93cfa3b950fef5.r2.dev/h5ad/ZMAP_251209_processed_slim_tpm.h5ad",
         "filename": "ZMAP_251209_processed_slim_tpm.h5ad",
     },
     # Processed slim / symphony reference
@@ -247,7 +247,7 @@ def preprocess_tpmlog(adata: ad.AnnData):
 
 def load_zmap_h5ad(
     *,
-    kind: str | None = "processed_slim",
+    kind: str | None = "processed_slim_tpm",
     url: str | None = None,
     dest_dir: str | os.PathLike | None = None,
     filename: str | None = None,
@@ -288,7 +288,7 @@ def load_zmap_h5ad(
         write_to_disk = True
 
     # uncompressed cache is only meaningful for persistent, non-backed loads
-    _do_uncompressed = cache_uncompressed and write_to_disk and not backed
+    _do_uncompressed = cache_uncompressed and write_to_disk and not backed and pathlib.Path("/content/drive/MyDrive").exists()
 
     # ------------------------------------------------------------------
     # 1) In-memory cache check (fastest path — same session)
