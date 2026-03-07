@@ -2128,21 +2128,25 @@ def group_descendants_vs_markers(
         warnings.warn("`cluster_col` is deprecated; use `child_col`.", DeprecationWarning, stacklevel=2)
         child_col = cluster_col
 
-    # -------------------- 1) derive group_order from obs only (no copy yet) ------
+    # -------------------- 1) subset adata to chosen parent ----------------------
     if parent_col not in adata.obs.columns:
         raise KeyError(f"{parent_col!r} not found in adata.obs columns.")
-    if child_col not in adata.obs.columns:
-        raise KeyError(f"{child_col!r} not found in adata.obs columns.")
     if parent is None:
         raise ValueError("`parent` must be provided (e.g., a specific Tissue or CellType label).")
 
-    parent_mask = adata.obs[parent_col].astype(str) == str(parent)
-    if parent_mask.sum() == 0:
+    mask = adata.obs[parent_col].astype(str) == str(parent)
+    if mask.sum() == 0:
         raise ValueError(f"No cells found with {parent_col} == {parent!r}.")
 
-    # Work directly on adata.obs — no copy needed to derive group_order
-    children_series = adata.obs.loc[parent_mask, child_col].astype(str)
-    group_counts = children_series.value_counts(sort=False)
+    # Copy small subset to avoid chained-assignment surprises
+    adata_tmp = adata[mask].copy()
+
+    # -------------------- 2) find child groups & optional filtering -------------
+    if child_col not in adata_tmp.obs.columns:
+        raise KeyError(f"{child_col!r} not found in adata.obs columns.")
+
+    children = adata_tmp.obs[child_col].astype(str)
+    group_counts = children.value_counts(sort=False)
 
     if min_cells_per_group is not None:
         keep_groups = group_counts[group_counts >= int(min_cells_per_group)].index.astype(str).tolist()
@@ -2155,11 +2159,12 @@ def group_descendants_vs_markers(
             f"no {child_col} groups remain within parent {parent!r}."
         )
 
-    # Preserve observed order (matching original pd.unique behaviour)
-    kept_mask = children_series.isin(keep_groups)
-    group_order = list(pd.unique(children_series[kept_mask]))
+    # Restrict to kept child groups (within this parent)
+    adata_tmp = adata_tmp[adata_tmp.obs[child_col].astype(str).isin(keep_groups)].copy()
+    children = adata_tmp.obs[child_col].astype(str)
+    group_order = list(pd.unique(children))  # preserve observed order
 
-    # -------------------- 2) load consensus markers at child level ---------------
+    # -------------------- 3) load consensus markers at child level --------------
     consensus_level = _ZMAP_LEVEL_LOOKUP.get(child_col)
     if consensus_level is None:
         raise KeyError(
@@ -2196,9 +2201,9 @@ def group_descendants_vs_markers(
             "Check that your consensus tables and obs labels match."
         )
 
-    # Intersect marker genes with adata.var_names *before* copying
-    var_names_full = adata.var_names.astype(str)
-    present_genes = pd.Index(marker_df["gene"].unique()).intersection(var_names_full)
+    # Drop genes not in var_names
+    var_names = adata_tmp.var_names.astype(str)
+    present_genes = pd.Index(marker_df["gene"].unique()).intersection(var_names)
     marker_df = marker_df[marker_df["gene"].isin(present_genes)]
     if marker_df.empty:
         raise ValueError("No marker genes overlap with adata.var_names for this subset.")
@@ -2207,17 +2212,7 @@ def group_descendants_vs_markers(
     marker_df["celltype"] = pd.Categorical(marker_df["celltype"], categories=group_order, ordered=True)
     marker_df = marker_df.sort_values(["celltype"]).reset_index(drop=True)
 
-    # -------------------- 3) single combined copy: cells AND genes ---------------
-    # Now that we know both the cell subset and the gene subset, we do one copy
-    # instead of two, carrying only the vars that will actually be used.
-    cell_mask = parent_mask & adata.obs[child_col].astype(str).isin(keep_groups)
-    adata_tmp = adata[cell_mask, present_genes].copy()
-
-    # -------------------- 4) optional row dendrogram on mean expression ----------
-    # adata_tmp.var is now exactly present_genes, so gene_idx will always be valid;
-    # the valid_mask guard is kept as a safety net but should be a no-op.
-    var_names = adata_tmp.var_names.astype(str)
-
+    # -------------------- 4) optional row dendrogram on mean expression ---------
     if use_dendrogram_rows:
         genes_unique = pd.Index(marker_df["gene"].unique())
         gene_idx = var_names.get_indexer(genes_unique)
@@ -2300,7 +2295,7 @@ def group_descendants_vs_markers(
         group_color_dict=None if group_color_dict is None else dict(group_color_dict),
         duplicate_gene_columns=duplicate_gene_columns,
         show_size_legend=show_size_legend,
-        cbar_bbox_to_anchor=(1.02, 0.85),
+        cbar_bbox_to_anchor = (1.02, 0.85),
         **dotplot_kwargs,
     )
 
