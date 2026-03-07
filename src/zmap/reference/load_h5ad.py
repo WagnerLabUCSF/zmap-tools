@@ -50,20 +50,20 @@ def _default_h5ad_dir() -> pathlib.Path:
     so files persist across Colab sessions. Falls back to <cwd>/zmap/h5ads
     if Drive is not mounted.
     """
-    drive_path = pathlib.Path("/content/drive/MyDrive/zmap")
+    default_drive_path = pathlib.Path("/content/drive/MyDrive/zmap/h5ad")
 
     # Use Drive if it's mounted and accessible
-    if drive_path.parent.exists():
-        drive_path.mkdir(parents=True, exist_ok=True)
-        return drive_path
+    if default_drive_path.parent.exists():
+        default_drive_path.mkdir(parents=True, exist_ok=True)
+        return default_drive_path
 
     # Fallback for non-Colab or unmounted Drive
     print(
         "[ZMAP] Google Drive not detected at /content/drive/MyDrive — "
-        "using local cache at <cwd>/zmap/h5ads. "
+        "using local cache at <cwd>/zmap/h5ad. "
         "Mount Drive and re-run to enable persistent caching."
     )
-    fallback_path = pathlib.Path.cwd() / "zmap" / "h5ads"
+    fallback_path = pathlib.Path.cwd() / "zmap" / "h5ad"
     fallback_path.mkdir(parents=True, exist_ok=True)
     return fallback_path
 
