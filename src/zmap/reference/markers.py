@@ -22,6 +22,8 @@ _MARKER_URLS: Dict[str, str] = {
     "Leiden100":        "https://pub-dbadc2c623224cb58d93cfa3b950fef5.r2.dev/csv/consensus_markers/ZMAP_leiden100_consensus_report.csv.zip",
 }
 
+_MARKER_TABLE_CACHE: Dict[str, pd.DataFrame] = {}
+
 # ---------------------------------------------------------------------
 # Cache directory helper
 # ---------------------------------------------------------------------
@@ -62,11 +64,14 @@ def _load_marker_table(level: str) -> pd.DataFrame:
     Handles extra __MACOSX/._ files in the ZIP (common on macOS).
     Also strips any leading "ZMAP_..._consensus_report" index-like column.
     """
+    if level in _MARKER_TABLE_CACHE:
+        return _MARKER_TABLE_CACHE[level]
+
     if level not in _MARKER_URLS:
         raise ValueError(f"Unknown level {level!r}. Must be one of {list(_MARKER_URLS.keys())}.")
 
     url = _MARKER_URLS[level]
-    cache_dir = _default_marker_dir()
+    cache_dir = _get_cache_dir()
     zip_name = f"{level}_consensus_report.csv.zip"
     zip_path = cache_dir / zip_name
 
@@ -107,6 +112,7 @@ def _load_marker_table(level: str) -> pd.DataFrame:
     if first_col.startswith("ZMAP_") or first_col.startswith("Unnamed:"):
         df = df.drop(columns=[first_col])
 
+    _MARKER_TABLE_CACHE[level] = df
     return df
 
 
