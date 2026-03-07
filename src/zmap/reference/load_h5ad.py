@@ -272,23 +272,21 @@ def load_zmap_h5ad(
     cache_uncompressed
         If True (default), write an uncompressed copy of the h5ad to disk on
         first load and prefer it on subsequent loads. Faster to read but uses
-        more disk space. Has no effect when write_to_disk=False or backed=True.
-
-    Examples
-    --------
-    adata = load_zmap_h5ad(kind="symphony")
-    adata_raw = load_zmap_h5ad(kind="raw")
-    adata_custom = load_zmap_h5ad(
-        url="https://.../my_custom.h5ad", filename="my_custom.h5ad"
-    )
+        more disk space. Has no effect when write_to_disk=False or backed=True,
+        or when Google Drive is not mounted.
     """
     # backed mode requires a real file on disk
     if backed and not write_to_disk:
         print("[ZMAP] backed=True requires write_to_disk=True; overriding.")
         write_to_disk = True
 
-    # uncompressed cache is only meaningful for persistent, non-backed loads
-    _do_uncompressed = cache_uncompressed and write_to_disk and not backed and pathlib.Path("/content/drive/MyDrive").exists()
+    # uncompressed cache only makes sense on persistent, non-backed, Drive-backed loads
+    _do_uncompressed = (
+        cache_uncompressed
+        and write_to_disk
+        and not backed
+        and pathlib.Path("/content/drive/MyDrive").exists()
+    )
 
     # ------------------------------------------------------------------
     # 1) In-memory cache check (fastest path — same session)
@@ -298,40 +296,9 @@ def load_zmap_h5ad(
         return _H5AD_CACHE[cache_key]
 
     # ------------------------------------------------------------------
-    # 2) Resolve the compressed file path (without downloading yet)
-    #    so we can derive the uncompressed path and check it first.
-    # ------------------------------------------------------------------
-    if _do_uncompressed:
-        meta = H5AD_SOURCES.get(kind or "", {}) if url is None else {}
-        final_url = url or meta.get("url")
-
-        if dest_dir is None:
-            dest_dir_path = _default_h5ad_dir()
-        else:
-            dest_dir_path = pathlib.Path(dest_dir)
-
-        if filename is not None:
-            fname = filename
-        elif "filename" in meta:
-            fname = meta["filename"]
-        elif final_url is not None:
-            fname = pathlib.Path(urllib.request.urlparse(final_url).path).name or "zmap.h5ad"
-        else:
-            fname = "zmap.h5ad"
-
-        compressed_path = dest_dir_path / fname
-        uncompressed = _uncompressed_path(compressed_path)
-
-        # Warm path: uncompressed file already exists and download not forced
-        if uncompressed.exists() and not force_download:
-            print(f"[ZMAP] Loading uncompressed cache from {uncompressed}")
-            adata = ad.read_h5ad(uncompressed)
-            if use_cache:
-                _H5AD_CACHE[cache_key] = adata
-            return adata
-
-    # ------------------------------------------------------------------
-    # 3) Download or reuse compressed file
+    # 2) Resolve compressed path — download_zmap_h5ad is the single
+    #    source of truth for the path. We derive the uncompressed path
+    #    from its return value, not independently.
     # ------------------------------------------------------------------
     path = download_zmap_h5ad(
         kind=kind,
@@ -345,7 +312,19 @@ def load_zmap_h5ad(
     )
 
     # ------------------------------------------------------------------
-    # 4) Load
+    # 3) Check for uncompressed copy before loading compressed
+    # ------------------------------------------------------------------
+    if _do_uncompressed:
+        uncompressed = _uncompressed_path(path)
+        if uncompressed.exists() and not force_download:
+            print(f"[ZMAP] Loading uncompressed cache from {uncompressed}")
+            adata = ad.read_h5ad(uncompressed)
+            if use_cache:
+                _H5AD_CACHE[cache_key] = adata
+            return adata
+
+    # ------------------------------------------------------------------
+    # 4) Load compressed file
     # ------------------------------------------------------------------
     if backed:
         backed_mode = "r" if backed is True else backed
@@ -370,7 +349,7 @@ def load_zmap_h5ad(
         adata.write_h5ad(uncompressed, compression=None)
 
     # ------------------------------------------------------------------
-    # 7) Clean up compressed file if not keeping persistent copy
+    # 7) Clean up if we didn't want a persistent copy
     # ------------------------------------------------------------------
     if not write_to_disk:
         try:
