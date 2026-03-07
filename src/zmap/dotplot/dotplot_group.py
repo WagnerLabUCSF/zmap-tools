@@ -1100,7 +1100,7 @@ def plot_dotplot_design_fullgrid(
         else:
             tmp = adata.obs[[groupby, rowlabel_child_col]].dropna()
             tmp = tmp.drop_duplicates([groupby, rowlabel_child_col])
-            counts = tmp.groupby(groupby, sort=False)[rowlabel_child_col].nunique()
+            counts = tmp.groupby(groupby, sort=False, observed=True)[rowlabel_child_col].nunique()
 
         display_labels = []
         for r in row_order:

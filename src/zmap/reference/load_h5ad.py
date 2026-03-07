@@ -44,14 +44,28 @@ _H5AD_CACHE: dict[tuple[str, str | None, bool], ad.AnnData] = {}
 
 def _default_h5ad_dir() -> pathlib.Path:
     """
-    Default directory to store H5ADs:
-        <cwd>/zmap/h5ads
-    In Colab, this will be /content/zmap/h5ads.
+    Default directory to store / cache H5ADs.
+
+    Uses Google Drive when available (/content/drive/MyDrive/zmap),
+    so files persist across Colab sessions. Falls back to <cwd>/zmap/h5ads
+    if Drive is not mounted.
     """
-    root = pathlib.Path.cwd()
-    d = root / "zmap" / "h5ads"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    drive_path = pathlib.Path("/content/drive/MyDrive/zmap")
+
+    # Use Drive if it's mounted and accessible
+    if drive_path.parent.exists():
+        drive_path.mkdir(parents=True, exist_ok=True)
+        return drive_path
+
+    # Fallback for non-Colab or unmounted Drive
+    print(
+        "[ZMAP] Google Drive not detected at /content/drive/MyDrive — "
+        "using local cache at <cwd>/zmap/h5ads. "
+        "Mount Drive and re-run to enable persistent caching."
+    )
+    fallback_path = pathlib.Path.cwd() / "zmap" / "h5ads"
+    fallback_path.mkdir(parents=True, exist_ok=True)
+    return fallback_path
 
 
 def _open_url(url: str):
@@ -212,6 +226,10 @@ def preprocess_tpmlog(adata: ad.AnnData):
         sc.pp.log1p(adata)
         adata.layers["tpm_log"] = adata.X
         del adata.X
+
+# --------------------------------------------------------------------
+# High Level Wrapper (download if needed, load, preprocess)
+# --------------------------------------------------------------------
 
 
 def load_zmap_h5ad(
