@@ -71,7 +71,7 @@ def _load_marker_table(level: str) -> pd.DataFrame:
         raise ValueError(f"Unknown level {level!r}. Must be one of {list(_MARKER_URLS.keys())}.")
 
     url = _MARKER_URLS[level]
-    cache_dir = _get_cache_dir()
+    cache_dir = _default_marker_dir()
     zip_name = f"{level}_consensus_report.csv.zip"
     zip_path = cache_dir / zip_name
 
