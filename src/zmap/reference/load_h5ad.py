@@ -17,20 +17,25 @@ H5AD_SOURCES = {
         "url": "https://pub-dbadc2c623224cb58d93cfa3b950fef5.r2.dev/h5ad/ZMAP_250402_raw.h5ad",
         "filename": "ZMAP_250402_raw.h5ad",
     },
-    # Fully processed (large)
+    # Fully processed (full dataset + intermediate files)
     "processed": {
         "url": "https://pub-dbadc2c623224cb58d93cfa3b950fef5.r2.dev/h5ad/ZMAP_251209_processed.h5ad",
-        "filename": "ZMAP_251008_processed.h5ad",
+        "filename": "ZMAP_251209_processed.h5ad",
     },
-    # Fully processed for plotting only (slim)
+    # Fully processed but raw counts only
     "processed_slim": {
         "url": "https://pub-dbadc2c623224cb58d93cfa3b950fef5.r2.dev/h5ad/ZMAP_251209_processed_slim.h5ad",
-        "filename": "ZMAP_251008_processed_slim.h5ad",
+        "filename": "ZMAP_251209_processed_slim.h5ad",
+    },
+    # Fully processed but tpm counts only (best for plotting)
+    "processed_slim": {
+        "url": "",
+        "filename": "ZMAP_251209_processed_slim_tpm.h5ad",
     },
     # Processed slim / symphony reference
     "symphony": {
         "url": "https://pub-dbadc2c623224cb58d93cfa3b950fef5.r2.dev/h5ad/ZMAP_260103_symphony.h5ad",
-        "filename": "ZMAP_251016_symphony.h5ad",
+        "filename": "ZMAP_260103_symphony.h5ad",
     },
 }
 
@@ -46,8 +51,8 @@ def _default_h5ad_dir() -> pathlib.Path:
     """
     Default directory to store / cache H5ADs.
 
-    Uses Google Drive when available (/content/drive/MyDrive/zmap),
-    so files persist across Colab sessions. Falls back to <cwd>/zmap/h5ads
+    Uses Google Drive when available (/content/drive/MyDrive/zmap/h5ad),
+    so files persist across Colab sessions. Falls back to <cwd>/zmap/h5ad
     if Drive is not mounted.
     """
     default_drive_path = pathlib.Path("/content/drive/MyDrive/zmap/h5ad")
@@ -66,6 +71,14 @@ def _default_h5ad_dir() -> pathlib.Path:
     fallback_path = pathlib.Path.cwd() / "zmap" / "h5ad"
     fallback_path.mkdir(parents=True, exist_ok=True)
     return fallback_path
+
+
+def _uncompressed_path(compressed_path: pathlib.Path) -> pathlib.Path:
+    """
+    Derive the path for an uncompressed copy of an h5ad file.
+    e.g. ZMAP_processed_slim.h5ad -> ZMAP_processed_slim.uncompressed.h5ad
+    """
+    return compressed_path.with_suffix("").with_suffix(".uncompressed.h5ad")
 
 
 def _open_url(url: str):
@@ -227,10 +240,10 @@ def preprocess_tpmlog(adata: ad.AnnData):
         adata.layers["tpm_log"] = adata.X
         del adata.X
 
+
 # --------------------------------------------------------------------
 # High Level Wrapper (download if needed, load, preprocess)
 # --------------------------------------------------------------------
-
 
 def load_zmap_h5ad(
     *,
@@ -245,9 +258,21 @@ def load_zmap_h5ad(
     chunk_size: int = 1 << 20,
     show_progress: bool = True,
     attempt_preprocess_tpmlog: bool = True,
+    cache_uncompressed: bool = True,
 ) -> ad.AnnData:
     """
     High-level loader for ZMAP H5ADs.
+
+    On first load, downloads the (compressed) h5ad, runs any preprocessing,
+    then writes an uncompressed copy alongside it. Subsequent loads read the
+    uncompressed copy directly, skipping download and decompression entirely.
+
+    Parameters
+    ----------
+    cache_uncompressed
+        If True (default), write an uncompressed copy of the h5ad to disk on
+        first load and prefer it on subsequent loads. Faster to read but uses
+        more disk space. Has no effect when write_to_disk=False or backed=True.
 
     Examples
     --------
@@ -262,13 +287,52 @@ def load_zmap_h5ad(
         print("[ZMAP] backed=True requires write_to_disk=True; overriding.")
         write_to_disk = True
 
+    # uncompressed cache is only meaningful for persistent, non-backed loads
+    _do_uncompressed = cache_uncompressed and write_to_disk and not backed
+
+    # ------------------------------------------------------------------
+    # 1) In-memory cache check (fastest path — same session)
+    # ------------------------------------------------------------------
     cache_key = (kind or "custom", url, bool(backed))
     if use_cache and cache_key in _H5AD_CACHE:
         return _H5AD_CACHE[cache_key]
 
-    # ----------------------------------------------------------------------
-    # Download or reuse existing file
-    # ----------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # 2) Resolve the compressed file path (without downloading yet)
+    #    so we can derive the uncompressed path and check it first.
+    # ------------------------------------------------------------------
+    if _do_uncompressed:
+        meta = H5AD_SOURCES.get(kind or "", {}) if url is None else {}
+        final_url = url or meta.get("url")
+
+        if dest_dir is None:
+            dest_dir_path = _default_h5ad_dir()
+        else:
+            dest_dir_path = pathlib.Path(dest_dir)
+
+        if filename is not None:
+            fname = filename
+        elif "filename" in meta:
+            fname = meta["filename"]
+        elif final_url is not None:
+            fname = pathlib.Path(urllib.request.urlparse(final_url).path).name or "zmap.h5ad"
+        else:
+            fname = "zmap.h5ad"
+
+        compressed_path = dest_dir_path / fname
+        uncompressed = _uncompressed_path(compressed_path)
+
+        # Warm path: uncompressed file already exists and download not forced
+        if uncompressed.exists() and not force_download:
+            print(f"[ZMAP] Loading uncompressed cache from {uncompressed}")
+            adata = ad.read_h5ad(uncompressed)
+            if use_cache:
+                _H5AD_CACHE[cache_key] = adata
+            return adata
+
+    # ------------------------------------------------------------------
+    # 3) Download or reuse compressed file
+    # ------------------------------------------------------------------
     path = download_zmap_h5ad(
         kind=kind,
         url=url,
@@ -280,9 +344,9 @@ def load_zmap_h5ad(
         show_progress=show_progress,
     )
 
-    # ----------------------------------------------------------------------
-    # Load
-    # ----------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # 4) Load
+    # ------------------------------------------------------------------
     if backed:
         backed_mode = "r" if backed is True else backed
         print(f"[ZMAP] Loading (backed={backed_mode!r}) from {path}")
@@ -291,15 +355,23 @@ def load_zmap_h5ad(
         print(f"[ZMAP] Loading into memory from {path}")
         adata = ad.read_h5ad(path)
 
-    # ----------------------------------------------------------------------
-    # Optional preprocessing step
-    # ----------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # 5) Optional preprocessing
+    # ------------------------------------------------------------------
     if attempt_preprocess_tpmlog and not backed:
         preprocess_tpmlog(adata)
 
-    # ----------------------------------------------------------------------
-    # Clean up if we didn't want a persistent copy
-    # ----------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # 6) Write uncompressed copy for fast future loads
+    # ------------------------------------------------------------------
+    if _do_uncompressed:
+        print(f"[ZMAP] Writing uncompressed cache → {uncompressed}")
+        print("[ZMAP] (this only happens once; future loads will be much faster)")
+        adata.write_h5ad(uncompressed, compression=None)
+
+    # ------------------------------------------------------------------
+    # 7) Clean up compressed file if not keeping persistent copy
+    # ------------------------------------------------------------------
     if not write_to_disk:
         try:
             os.unlink(path)
@@ -310,5 +382,3 @@ def load_zmap_h5ad(
         _H5AD_CACHE[cache_key] = adata
 
     return adata
-
-
