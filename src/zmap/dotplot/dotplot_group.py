@@ -463,6 +463,127 @@ def make_sibling_design_df(
     return design_df
 
 
+def _get_expression_slice(
+    adata: ad.AnnData,
+    genes: Sequence[str],
+    *,
+    layer: str | None = None,
+    use_raw: bool | None = None,
+) -> "tuple[np.ndarray, list[str]]":
+    """
+    Densify a gene-subset of the expression matrix exactly once.
+    Returns (X_dense, valid_genes) where X_dense has shape (n_cells, len(valid_genes)).
+    Use the returned arrays as _x_dense / _x_genes in _compute_group_gene_means to
+    avoid repeated toarray() calls when the same gene set is queried across levels.
+    """
+    genes = [str(g) for g in genes]
+
+    if use_raw and getattr(adata, "raw", None) is not None:
+        X         = adata.raw.X
+        var_names = pd.Index(adata.raw.var_names).astype(str)
+    elif layer is not None:
+        X         = adata.layers[layer]
+        var_names = pd.Index(adata.var_names).astype(str)
+    else:
+        X         = adata.X
+        var_names = pd.Index(adata.var_names).astype(str)
+
+    gene_idx_arr = var_names.get_indexer(genes)
+    valid_gene   = gene_idx_arr >= 0
+    valid_genes  = [g for g, v in zip(genes, valid_gene) if v]
+    gene_cols    = gene_idx_arr[valid_gene]
+
+    if not valid_genes:
+        return np.empty((X.shape[0], 0), dtype=np.float32), []
+
+    X_sub   = X[:, gene_cols]
+    X_dense = X_sub.toarray() if hasattr(X_sub, "toarray") else np.asarray(X_sub)
+    return X_dense.astype(np.float32), valid_genes  # float32 saves memory; promoted to float64 on use
+
+
+def _compute_group_gene_means(
+    adata: ad.AnnData,
+    groups: Sequence[str],
+    genes: Sequence[str],
+    *,
+    level_col: str,
+    layer: str | None = None,
+    use_raw: bool | None = None,
+    # Optional: pass a pre-densified (n_cells x n_genes) matrix and matching gene list
+    # to skip the sparse slice + toarray() entirely.
+    _x_dense: "np.ndarray | None" = None,
+    _x_genes: "list[str] | None" = None,
+) -> "tuple[np.ndarray, list[str], list[str]]":
+    """
+    Compute a (n_groups x n_genes) mean-expression matrix.
+    Returns (mat, valid_groups, valid_genes).
+
+    Groups absent from adata get an all-NaN row; genes absent are dropped.
+
+    Pass _x_dense + _x_genes to reuse an already-densified gene slice and
+    avoid repeated X[:, gene_cols].toarray() calls across multiple groupby levels.
+    """
+    groups = [str(s) for s in groups]
+    genes  = [str(g) for g in genes]
+
+    if _x_dense is not None and _x_genes is not None:
+        # Reuse pre-densified slice; filter columns to requested genes
+        x_gene_idx = pd.Index(_x_genes)
+        col_pos    = x_gene_idx.get_indexer(genes)
+        valid_gene = col_pos >= 0
+        valid_genes = [g for g, v in zip(genes, valid_gene) if v]
+        X_dense = _x_dense[:, col_pos[valid_gene]]
+    else:
+        # Choose expression source
+        if use_raw and getattr(adata, "raw", None) is not None:
+            X         = adata.raw.X
+            var_names = pd.Index(adata.raw.var_names).astype(str)
+        elif layer is not None:
+            X         = adata.layers[layer]
+            var_names = pd.Index(adata.var_names).astype(str)
+        else:
+            X         = adata.X
+            var_names = pd.Index(adata.var_names).astype(str)
+
+        gene_idx_arr = var_names.get_indexer(genes)
+        valid_gene   = gene_idx_arr >= 0
+        valid_genes  = [g for g, v in zip(genes, valid_gene) if v]
+        gene_cols    = gene_idx_arr[valid_gene]
+
+        if not valid_genes:
+            return np.empty((len(groups), 0), dtype=np.float64), groups, []
+
+        X_sub   = X[:, gene_cols]
+        X_dense = X_sub.toarray() if hasattr(X_sub, "toarray") else np.asarray(X_sub)
+
+    if not valid_genes:
+        return np.empty((len(groups), 0), dtype=np.float64), groups, []
+
+    # Map each cell to its group integer index (-1 = not in requested groups)
+    labels    = adata.obs[level_col].astype(str).values
+    ct_enum   = {ct: i for i, ct in enumerate(groups)}
+    label_idx = np.fromiter(
+        (ct_enum.get(l, -1) for l in labels), dtype=np.intp, count=len(labels)
+    )
+
+    valid_mask   = label_idx >= 0
+    valid_labels = label_idx[valid_mask]
+    X_valid      = X_dense[valid_mask].astype(np.float64)
+
+    n_groups = len(groups)
+
+    # Pandas groupby-mean is BLAS-backed and far faster than np.add.at
+    raw_means = (
+        pd.DataFrame(X_valid, index=valid_labels)
+        .groupby(level=0)
+        .mean()
+        .reindex(np.arange(n_groups))   # missing groups become NaN rows
+        .to_numpy(dtype=np.float64)
+    )
+
+    return raw_means, groups, valid_genes
+
+
 def reorder_groups_by_mean_expression(
     adata: ad.AnnData,
     groups: Sequence[str],
@@ -471,12 +592,13 @@ def reorder_groups_by_mean_expression(
     genes: Sequence[str],
     layer: str | None = None,
     use_raw: bool | None = None,
+    _x_dense=None,
+    _x_genes=None,
 ) -> list[str]:
     """
     Reorder groups so that rows are sorted by the *average expression*
     across all provided genes, in descending order.
-
-    Mean is taken over all cells in that group × all genes in `genes`.
+    Pass _x_dense/_x_genes to reuse a pre-densified gene slice.
     """
     groups = [str(s) for s in groups]
     if len(groups) <= 1 or len(genes) == 0:
@@ -485,50 +607,20 @@ def reorder_groups_by_mean_expression(
     if level_col not in adata.obs.columns:
         raise KeyError(f"level_col={level_col!r} not found in adata.obs.")
 
-    # Choose expression matrix
-    if use_raw and getattr(adata, "raw", None) is not None:
-        X = adata.raw.X
-        var_names = pd.Index(adata.raw.var_names).astype(str)
-    elif layer is not None:
-        X = adata.layers[layer]
-        var_names = pd.Index(adata.var_names).astype(str)
-    else:
-        X = adata.X
-        var_names = pd.Index(adata.var_names).astype(str)
-
-    genes = pd.Index(genes).astype(str)
-    gene_idx = var_names.get_indexer(genes)
-    valid = gene_idx >= 0
-    genes = genes[valid]
-    gene_idx = gene_idx[valid]
-
-    if genes.empty:
+    mat, valid_groups, valid_genes = _compute_group_gene_means(
+        adata, groups, genes, level_col=level_col, layer=layer, use_raw=use_raw,
+        _x_dense=_x_dense, _x_genes=_x_genes,
+    )
+    if mat.size == 0:
         return groups
 
-    Xg = X[:, gene_idx]
-    Xg = Xg.toarray() if hasattr(Xg, "toarray") else np.asarray(Xg)
-
-    labels = adata.obs[level_col].astype(str).values
-
-    row_means: dict[str, float] = {}
-    for s in groups:
-        idx = np.where(labels == s)[0]
-        if idx.size == 0:
-            continue
-        sub = Xg[idx, :]
-        m = float(np.nanmean(sub))
-        if np.isfinite(m):
-            row_means[s] = m
+    row_means_arr = np.nanmean(mat, axis=1)
+    row_means = {g: float(v) for g, v in zip(valid_groups, row_means_arr) if np.isfinite(v)}
 
     if not row_means:
         return groups
 
-    groups_sorted = sorted(
-        groups,
-        key=lambda s: row_means.get(s, -np.inf),
-        reverse=True,
-    )
-    return groups_sorted
+    return sorted(groups, key=lambda s: row_means.get(s, -np.inf), reverse=True)
 
 
 def reorder_genes_by_mean_expression(
@@ -539,13 +631,13 @@ def reorder_genes_by_mean_expression(
     level_col: str,
     layer: str | None = None,
     use_raw: bool | None = None,
+    _x_dense=None,
+    _x_genes=None,
 ) -> list[str]:
     """
     Reorder genes so that columns are sorted by the average expression
-    across all cells in the specified `groups` (descending).
-
-    Mean is taken over all cells with obs[level_col] in `groups`,
-    across each gene in `genes`.
+    across all cells in the specified groups (descending).
+    Pass _x_dense/_x_genes to reuse a pre-densified gene slice.
     """
     genes = [str(g) for g in genes]
     if len(genes) <= 1:
@@ -554,40 +646,16 @@ def reorder_genes_by_mean_expression(
     if level_col not in adata.obs.columns:
         raise KeyError(f"level_col={level_col!r} not found in adata.obs.")
 
-    # choose expression matrix
-    if use_raw and getattr(adata, "raw", None) is not None:
-        X = adata.raw.X
-        var_names = pd.Index(adata.raw.var_names).astype(str)
-    elif layer is not None:
-        X = adata.layers[layer]
-        var_names = pd.Index(adata.var_names).astype(str)
-    else:
-        X = adata.X
-        var_names = pd.Index(adata.var_names).astype(str)
-
-    genes_idx = var_names.get_indexer(genes)
-    valid = genes_idx >= 0
-    genes = [g for g, v in zip(genes, valid) if v]
-    genes_idx = genes_idx[valid]
-
-    if not genes:
-        return []
-
-    Xg = X[:, genes_idx]
-    Xg = Xg.toarray() if hasattr(Xg, "toarray") else np.asarray(Xg)
-
-    labels = adata.obs[level_col].astype(str).values
-
-    # collect all indices for the requested groups
-    idx_list = [np.where(labels == g)[0] for g in groups]
-    idx = np.concatenate([i for i in idx_list if i.size > 0]) if idx_list else np.array([], dtype=int)
-    if idx.size == 0:
+    mat, valid_groups, valid_genes = _compute_group_gene_means(
+        adata, groups, genes, level_col=level_col, layer=layer, use_raw=use_raw,
+        _x_dense=_x_dense, _x_genes=_x_genes,
+    )
+    if mat.size == 0:
         return genes
 
-    means = np.nanmean(Xg[idx, :], axis=0)
-    order = np.argsort(-means)     # descending
-    genes_sorted = [genes[i] for i in order]
-    return genes_sorted
+    col_means = np.nanmean(mat, axis=0)
+    order = np.argsort(-col_means)
+    return [valid_genes[i] for i in order]
 
 # ---------------------------------------------------------------------
 # Primary DotPlot Helper Function
@@ -819,37 +887,75 @@ def plot_dotplot_design_fullgrid(
     grid["mean_expr"] = np.nan
     grid["frac_pos"] = np.nan
 
-    # --------------------- compute stats ---------------------
+    # --------------------- compute stats (vectorized) ---------------------
     present_genes = pd.Index(cols_df["gene"].unique()).intersection(var_names)
-    jmap = pd.Series(range(len(var_names)), index=var_names)
-    labels = adata.obs[groupby].astype(str).values
-    ct_to_idx = {ct: np.where(labels == ct)[0] for ct in row_order}
-
-    batch = 256
     present_list = present_genes.tolist()
-    for start in range(0, len(present_list), batch):
-        sub_genes = present_list[start : start + batch]
-        cols = jmap.loc[sub_genes].to_numpy()
-        X_dense = (
-            X[:, cols].toarray()
-            if hasattr(X, "tocsc") or hasattr(X, "tocsr")
-            else np.asarray(X[:, cols])
+
+    if present_list:
+        jmap = pd.Series(range(len(var_names)), index=var_names)
+        gene_cols = jmap.loc[present_list].to_numpy()
+
+        # Densify only the needed gene columns once
+        X_sub = X[:, gene_cols]
+        X_dense = X_sub.toarray() if hasattr(X_sub, "toarray") else np.asarray(X_sub)
+
+        labels = adata.obs[groupby].astype(str).values
+        # Build integer label map for fast groupby via np.add.at
+        ct_list = row_order  # preserve row order
+        ct_enum = {ct: i for i, ct in enumerate(ct_list)}
+        label_idx = np.array([ct_enum.get(l, -1) for l in labels], dtype=np.intp)
+
+        n_groups = len(ct_list)
+        n_genes  = len(present_list)
+
+        sum_expr  = np.zeros((n_groups, n_genes), dtype=np.float64)
+        sum_pos   = np.zeros((n_groups, n_genes), dtype=np.float64)
+        counts    = np.zeros(n_groups, dtype=np.int64)
+
+        valid_mask = label_idx >= 0
+        valid_idx  = label_idx[valid_mask]
+        X_valid    = X_dense[valid_mask]
+
+        np.add.at(sum_expr, valid_idx, X_valid)
+        np.add.at(sum_pos,  valid_idx, (X_valid > detect_threshold).astype(np.float64))
+        np.add.at(counts,   valid_idx, 1)
+
+        # Avoid divide-by-zero for groups with no cells
+        safe_counts = counts[:, None].clip(min=1)
+        mean_mat  = sum_expr / safe_counts   # shape: (n_groups, n_genes)
+        frac_mat  = sum_pos  / safe_counts
+
+        # Zero out groups that had no cells
+        no_cells = (counts == 0)
+        mean_mat[no_cells] = np.nan
+        frac_mat[no_cells] = np.nan
+
+        # Build lookup DataFrames and merge into grid in one pass
+        gene_idx_ser = pd.Index(present_list)
+        rows_idx_ser = pd.Index(ct_list)
+
+        mean_df = pd.DataFrame(mean_mat, index=rows_idx_ser, columns=gene_idx_ser)
+        frac_df = pd.DataFrame(frac_mat, index=rows_idx_ser, columns=gene_idx_ser)
+
+        # Stack to long form and merge
+        mean_long = (
+            mean_df.stack()
+            .rename("mean_expr_new")
+            .reset_index()
+            .rename(columns={"level_0": "celltype", "level_1": "gene"})
+        )
+        frac_long = (
+            frac_df.stack()
+            .rename("frac_pos_new")
+            .reset_index()
+            .rename(columns={"level_0": "celltype", "level_1": "gene"})
         )
 
-        for ct, idx in ct_to_idx.items():
-            if idx.size == 0:
-                continue
-            sub = X_dense[idx, :]
-            means = np.asarray(sub.mean(axis=0)).ravel()
-            fracs = np.asarray((sub > detect_threshold).mean(axis=0)).ravel()
-            m = pd.Series(means, index=sub_genes)
-            f = pd.Series(fracs, index=sub_genes)
-
-            sel = (grid["celltype"] == ct) & (grid["gene"].isin(sub_genes))
-            if not sel.any():
-                continue
-            grid.loc[sel, "mean_expr"] = grid.loc[sel, "gene"].map(m)
-            grid.loc[sel, "frac_pos"] = grid.loc[sel, "gene"].map(f)
+        grid = grid.merge(mean_long, on=["celltype", "gene"], how="left")
+        grid = grid.merge(frac_long, on=["celltype", "gene"], how="left")
+        grid["mean_expr"] = grid["mean_expr_new"].combine_first(grid["mean_expr"])
+        grid["frac_pos"]  = grid["frac_pos_new"].combine_first(grid["frac_pos"])
+        grid.drop(columns=["mean_expr_new", "frac_pos_new"], inplace=True)
 
     grid["_ri"] = grid["celltype"].map(row_index)
     grid["_cj"] = grid["col_id"].map(col_index)
@@ -1556,6 +1662,14 @@ def group_siblings_vs_markers(
         raise ValueError(f"No rows in marker_df for focal node={node_str!r}.")
     genes = node_markers["gene"].astype(str).unique().tolist()
 
+    # ---- 2b) Densify X[:, gene_cols] ONCE for all pre-render steps ----
+    # Steps 3, 4, 4b, and the colorscale computation all query the same gene
+    # columns. We slice the sparse matrix here and pass the dense array through
+    # via _x_dense / _x_genes to avoid repeated toarray() calls.
+    _x_dense, _x_genes = _get_expression_slice(
+        adata, genes, layer=layer, use_raw=use_raw
+    )
+
     # ---- 3) Siblings (if not Tissue-level) ----
     if has_sibling_block:
         parent_label, siblings = get_parent_and_siblings(
@@ -1572,6 +1686,8 @@ def group_siblings_vs_markers(
             genes=genes,
             layer=layer,
             use_raw=use_raw,
+            _x_dense=_x_dense,
+            _x_genes=_x_genes,
         )
     else:
         siblings = []
@@ -1596,6 +1712,8 @@ def group_siblings_vs_markers(
         genes=genes,
         layer=layer,
         use_raw=use_raw,
+        _x_dense=_x_dense,
+        _x_genes=_x_genes,
     )
 
     # ---- 4b) Reorder genes by global mean (column order) ----
@@ -1608,6 +1726,8 @@ def group_siblings_vs_markers(
             level_col=level_col,
             layer=layer,
             use_raw=use_raw,
+            _x_dense=_x_dense,
+            _x_genes=_x_genes,
         )
     else:
         # tissue-only case
@@ -1618,6 +1738,8 @@ def group_siblings_vs_markers(
             level_col="ZMAP_Tissue",
             layer=layer,
             use_raw=use_raw,
+            _x_dense=_x_dense,
+            _x_genes=_x_genes,
         )
 
     # ---- 5) Now build design_dfs using the reordered genes ----
@@ -1756,45 +1878,42 @@ def group_siblings_vs_markers(
     ax_leg.axis("off")
 
     # ---- 8) Optional: global colorscale (vmin/vmax) across both panels ----
+    # Computed directly from group-mean matrices — no throwaway renders needed.
     vmin_global = vmax_global = None
     if enforce_global_colorscale:
-        # compute once from both sibling + tissue designs
-        designs = []
+        panels: list[tuple[list[str], str]] = []
         if design_sib is not None:
-            designs.append(("sib", design_sib, level_col))
-        designs.append(("tiss", design_tiss, "ZMAP_Tissue"))
+            panels.append((siblings, level_col))
+        panels.append((tissues, "ZMAP_Tissue"))
 
-        all_vals = []
-        for _, ddf, gcol in designs:
-            _, g_grid = plot_dotplot_design_fullgrid(
+        all_vals: list[np.ndarray] = []
+        for panel_groups, gcol in panels:
+            mat, _, _ = _compute_group_gene_means(
                 adata,
-                design_df=ddf,
-                groupby=gcol,
+                groups=panel_groups,
+                genes=genes,
+                level_col=gcol,
                 layer=layer,
                 use_raw=use_raw,
-                standard_scale=standard_scale,
-                cmap=cmap,
-                add_colorbar=False,
-                show_size_legend=False,
-                show_ring_legend=False,
-                figsize=(1, 1),
+                _x_dense=_x_dense,
+                _x_genes=_x_genes,
             )
-            all_vals.append(g_grid["mean_expr"].to_numpy(dtype=float))
+            if standard_scale is not None and mat.size > 0:
+                amin = np.nanmin(mat, axis=0 if standard_scale == "var" else 1, keepdims=True)
+                amax = np.nanmax(mat, axis=0 if standard_scale == "var" else 1, keepdims=True)
+                rng  = amax - amin
+                with np.errstate(invalid="ignore", divide="ignore"):
+                    mat = (mat - amin) / rng
+                mat = np.where(np.isfinite(mat), mat, 0.0)
+                mat = np.where(rng == 0, 0.0, mat)
+            all_vals.append(mat.ravel())
 
         if all_vals:
             all_vals_concat = np.concatenate(all_vals)
             finite = np.isfinite(all_vals_concat)
             if finite.any():
-                vmin_global = np.nanpercentile(all_vals_concat[finite], 1)
-                vmax_global = np.nanpercentile(all_vals_concat[finite], 99)
-
-        # close ONLY the temporary figures created above
-        for f in plt.get_fignums():
-            fig_tmp = plt.figure(f)
-            # identify tiny temp figs by size (width < 2in AND height < 2in)
-            w, h = fig_tmp.get_size_inches()
-            if w < 2 and h < 2:
-                plt.close(fig_tmp)
+                vmin_global = float(np.nanpercentile(all_vals_concat[finite], 1))
+                vmax_global = float(np.nanpercentile(all_vals_concat[finite], 99))
 
     # ---- 9) Draw sibling block (top) ----
     grid_sib = None
