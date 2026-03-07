@@ -11,14 +11,12 @@ except PackageNotFoundError:
 # Import subpackages as attributes 
 from . import process      # zmap.process
 from . import reference    # zmap.reference
-from . import tools        # zmap.tools
 from . import dotplot      # zmap.dotplot
 from . import predict      # zmap.predict
 
 # Scanpy-style aliases: 
 pp = process
 ref = reference
-tl = tools
 
 
-__all__ = ["__version__", "pp", "ref", "tl" ,"dotplot", "predict"]
+__all__ = ["__version__", "pp", "ref","dotplot", "predict"]
