@@ -26,13 +26,29 @@ _MARKER_URLS: Dict[str, str] = {
 # Cache directory helper
 # ---------------------------------------------------------------------
 
-def _get_cache_dir() -> Path:
+def _default_marker_dir() -> Path:
     """
     Return the local cache directory for zmap_tools marker tables.
+
+    Uses Google Drive when available (/content/drive/MyDrive/zmap/markers),
+    so files persist across Colab sessions. Falls back to ~/.cache/zmap_tools
+    if Drive is not mounted.
     """
-    root = Path(os.path.expanduser("~")) / ".cache" / "zmap_tools"
-    root.mkdir(parents=True, exist_ok=True)
-    return root
+    default_drive_path = Path("/content/drive/MyDrive/zmap/markers")
+
+    if default_drive_path.parent.parent.exists():  # checks /content/drive/MyDrive
+        default_drive_path.mkdir(parents=True, exist_ok=True)
+        return default_drive_path
+
+    print(
+        "[ZMAP] Google Drive not detected at /content/drive/MyDrive — "
+        "using local cache at ~/.cache/zmap_tools. "
+        "Mount Drive and re-run to enable persistent caching."
+    )
+    fallback_path = Path(os.path.expanduser("~")) / ".cache" / "zmap_tools"
+    fallback_path.mkdir(parents=True, exist_ok=True)
+    return fallback_path
+
 
 # ---------------------------------------------------------------------
 # Download + load helper (handles macOS __MACOSX junk)
@@ -50,7 +66,7 @@ def _load_marker_table(level: str) -> pd.DataFrame:
         raise ValueError(f"Unknown level {level!r}. Must be one of {list(_MARKER_URLS.keys())}.")
 
     url = _MARKER_URLS[level]
-    cache_dir = _get_cache_dir()
+    cache_dir = _default_marker_dir()
     zip_name = f"{level}_consensus_report.csv.zip"
     zip_path = cache_dir / zip_name
 

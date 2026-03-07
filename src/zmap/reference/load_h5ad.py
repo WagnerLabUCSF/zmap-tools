@@ -201,7 +201,7 @@ def download_zmap_h5ad(
 
     # Persistent copy
     if dest_path.exists() and not force_download:
-        print(f"[ZMAP] Using existing file: {dest_path}")
+        print(f"[ZMAP] Using cached file: {dest_path}")
         return dest_path
 
     _stream_download(
