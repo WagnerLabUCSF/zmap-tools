@@ -55,30 +55,55 @@ def _default_h5ad_dir() -> pathlib.Path:
     so files persist across Colab sessions. Falls back to <cwd>/zmap/h5ad
     if Drive is not mounted.
     """
-    default_drive_path = pathlib.Path("/content/drive/MyDrive/zmap/h5ad")
+    drive_path = pathlib.Path("/content/drive/MyDrive/zmap/h5ad")
+    if drive_path.parent.exists():
+        drive_path.mkdir(parents=True, exist_ok=True)
+        return drive_path
 
-    # Use Drive if it's mounted and accessible
-    if default_drive_path.parent.exists():
-        default_drive_path.mkdir(parents=True, exist_ok=True)
-        return default_drive_path
-
-    # Fallback for non-Colab or unmounted Drive
     print(
         "[ZMAP] Google Drive not detected at /content/drive/MyDrive — "
         "using local cache at <cwd>/zmap/h5ad. "
         "Mount Drive and re-run to enable persistent caching."
     )
-    fallback_path = pathlib.Path.cwd() / "zmap" / "h5ad"
-    fallback_path.mkdir(parents=True, exist_ok=True)
-    return fallback_path
+    fallback = pathlib.Path.cwd() / "zmap" / "h5ad"
+    fallback.mkdir(parents=True, exist_ok=True)
+    return fallback
 
 
 def _uncompressed_path(compressed_path: pathlib.Path) -> pathlib.Path:
     """
     Derive the path for an uncompressed copy of an h5ad file.
-    e.g. ZMAP_processed_slim.h5ad -> ZMAP_processed_slim.uncompressed.h5ad
+    e.g. ZMAP_processed_slim_tpm.h5ad -> ZMAP_processed_slim_tpm.uncompressed.h5ad
     """
     return compressed_path.with_suffix("").with_suffix(".uncompressed.h5ad")
+
+
+def _resolve_expected_path(
+    kind: str | None,
+    url: str | None,
+    dest_dir: str | os.PathLike | None,
+    filename: str | None,
+) -> pathlib.Path | None:
+    """
+    Derive the expected compressed file path using the same logic as
+    download_zmap_h5ad, without performing any I/O.
+    Returns None if the path cannot be determined.
+    """
+    meta = H5AD_SOURCES.get(kind or "", {}) if url is None else {}
+    final_url = url or meta.get("url")
+    if final_url is None:
+        return None
+
+    dest_dir_path = _default_h5ad_dir() if dest_dir is None else pathlib.Path(dest_dir)
+
+    if filename is not None:
+        fname = filename
+    elif "filename" in meta:
+        fname = meta["filename"]
+    else:
+        fname = pathlib.Path(urllib.request.urlparse(final_url).path).name or "zmap.h5ad"
+
+    return dest_dir_path / fname
 
 
 def _open_url(url: str):
@@ -105,7 +130,6 @@ def _stream_download(
     print(f"[ZMAP] Downloading {url} → {dest_path}")
     resp = _open_url(url)
     total = None
-    # Try to get total size from headers
     try:
         total = int(resp.headers.get("Content-Length", "0")) or None
     except Exception:
@@ -142,7 +166,7 @@ def _stream_download(
 
 def download_zmap_h5ad(
     *,
-    kind: str | None = "symphony",
+    kind: str | None = "processed_slim_tpm",
     url: str | None = None,
     dest_dir: str | os.PathLike | None = None,
     filename: str | None = None,
@@ -157,79 +181,57 @@ def download_zmap_h5ad(
     Parameters
     ----------
     kind
-        One of H5AD_SOURCES keys ('raw', 'processed', 'processed_slim'), used
-        to look up default URL and filename.
+        One of H5AD_SOURCES keys, used to look up default URL and filename.
         Ignored if `url` is provided.
     url
         Optional explicit URL. If given, overrides the registry URL.
     dest_dir
-        Directory to store the file. Default: <cwd>/zmap/h5ads.
+        Directory to store the file. Default: /content/drive/MyDrive/zmap/h5ad.
     filename
-        Optional filename. If None, uses registry filename (if kind known),
-        otherwise tries to infer from the URL.
+        Optional filename override.
     write_to_disk
-        If False, still uses a temporary file (for read_h5ad), but does not
-        keep a persistent copy.
+        If False, downloads to a temp file (not kept after load).
     force_download
-        If True, re-download even if dest file exists (only relevant when
-        write_to_disk=True).
+        If True, re-download even if dest file exists.
     """
-
-    # Determine metadata
     meta = H5AD_SOURCES.get(kind or "", {}) if url is None else {}
     final_url = url or meta.get("url")
     if final_url is None:
-        raise ValueError("No URL provided and no registry entry for kind={kind!r}")
+        raise ValueError(f"No URL provided and no registry entry for kind={kind!r}")
 
-    # Determine dest dir / filename
     if dest_dir is None:
         dest_dir_path = _default_h5ad_dir()
     else:
         dest_dir_path = pathlib.Path(dest_dir)
         dest_dir_path.mkdir(parents=True, exist_ok=True)
 
-    if filename is None:
-        if "filename" in meta:
-            fname = meta["filename"]
-        else:
-            # Try to guess filename from URL
-            fname = pathlib.Path(urllib.request.urlparse(final_url).path).name or "zmap.h5ad"
-    else:
+    if filename is not None:
         fname = filename
+    elif "filename" in meta:
+        fname = meta["filename"]
+    else:
+        fname = pathlib.Path(urllib.request.urlparse(final_url).path).name or "zmap.h5ad"
 
     dest_path = dest_dir_path / fname
 
-    # If we don't want a persistent copy, use a temp file
     if not write_to_disk:
         tmp = tempfile.NamedTemporaryFile(suffix=".h5ad", delete=False)
         dest_path = pathlib.Path(tmp.name)
         tmp.close()
-        _stream_download(
-            final_url,
-            dest_path,
-            chunk_size=chunk_size,
-            show_progress=show_progress,
-        )
+        _stream_download(final_url, dest_path, chunk_size=chunk_size, show_progress=show_progress)
         return dest_path
 
-    # Persistent copy
     if dest_path.exists() and not force_download:
         print(f"[ZMAP] Using cached file: {dest_path}")
         return dest_path
 
-    _stream_download(
-        final_url,
-        dest_path,
-        chunk_size=chunk_size,
-        show_progress=show_progress,
-    )
+    _stream_download(final_url, dest_path, chunk_size=chunk_size, show_progress=show_progress)
     return dest_path
 
 
 def preprocess_tpmlog(adata: ad.AnnData):
     """
     Add a 'tpm_log' layer if missing but 'raw_nolog' exists.
-
     Performs standard TPM normalization and log1p transform.
     """
     if "raw_nolog" in adata.layers and "tpm_log" not in adata.layers:
@@ -263,24 +265,26 @@ def load_zmap_h5ad(
     """
     High-level loader for ZMAP H5ADs.
 
-    On first load, downloads the (compressed) h5ad, runs any preprocessing,
-    then writes an uncompressed copy alongside it. Subsequent loads read the
-    uncompressed copy directly, skipping download and decompression entirely.
+    Load priority (fastest to slowest):
+        1. In-memory _H5AD_CACHE       (same session, instantaneous)
+        2. Uncompressed .h5ad on Drive (warm cache, ~60s)
+        3. Compressed .h5ad on Drive   (first load or forced, ~2min)
+        4. Fresh download              (no local file at all)
+
+    On first load, an uncompressed copy is written to Drive so that
+    subsequent sessions hit path 2 instead of path 3.
 
     Parameters
     ----------
     cache_uncompressed
-        If True (default), write an uncompressed copy of the h5ad to disk on
-        first load and prefer it on subsequent loads. Faster to read but uses
-        more disk space. Has no effect when write_to_disk=False or backed=True,
-        or when Google Drive is not mounted.
+        Write an uncompressed copy after first load for faster future reads.
+        Only active when Google Drive is mounted, write_to_disk=True, backed=False.
     """
-    # backed mode requires a real file on disk
     if backed and not write_to_disk:
         print("[ZMAP] backed=True requires write_to_disk=True; overriding.")
         write_to_disk = True
 
-    # uncompressed cache only makes sense on persistent, non-backed, Drive-backed loads
+    # uncompressed cache only makes sense on Drive
     _do_uncompressed = (
         cache_uncompressed
         and write_to_disk
@@ -289,16 +293,28 @@ def load_zmap_h5ad(
     )
 
     # ------------------------------------------------------------------
-    # 1) In-memory cache check (fastest path — same session)
+    # 1) In-memory cache (fastest — same session)
     # ------------------------------------------------------------------
     cache_key = (kind or "custom", url, bool(backed))
     if use_cache and cache_key in _H5AD_CACHE:
         return _H5AD_CACHE[cache_key]
 
     # ------------------------------------------------------------------
-    # 2) Resolve compressed path — download_zmap_h5ad is the single
-    #    source of truth for the path. We derive the uncompressed path
-    #    from its return value, not independently.
+    # 2) Check for uncompressed copy FIRST — before any other Drive I/O
+    # ------------------------------------------------------------------
+    if _do_uncompressed and not force_download:
+        expected_path = _resolve_expected_path(kind, url, dest_dir, filename)
+        if expected_path is not None:
+            uncompressed = _uncompressed_path(expected_path)
+            if uncompressed.exists():
+                print(f"[ZMAP] Loading uncompressed cache from {uncompressed}")
+                adata = ad.read_h5ad(uncompressed)
+                if use_cache:
+                    _H5AD_CACHE[cache_key] = adata
+                return adata
+
+    # ------------------------------------------------------------------
+    # 3) Download compressed file if needed
     # ------------------------------------------------------------------
     path = download_zmap_h5ad(
         kind=kind,
@@ -310,18 +326,6 @@ def load_zmap_h5ad(
         chunk_size=chunk_size,
         show_progress=show_progress,
     )
-
-    # ------------------------------------------------------------------
-    # 3) Check for uncompressed copy before loading compressed
-    # ------------------------------------------------------------------
-    if _do_uncompressed:
-        uncompressed = _uncompressed_path(path)
-        if uncompressed.exists() and not force_download:
-            print(f"[ZMAP] Loading uncompressed cache from {uncompressed}")
-            adata = ad.read_h5ad(uncompressed)
-            if use_cache:
-                _H5AD_CACHE[cache_key] = adata
-            return adata
 
     # ------------------------------------------------------------------
     # 4) Load compressed file
@@ -344,12 +348,13 @@ def load_zmap_h5ad(
     # 6) Write uncompressed copy for fast future loads
     # ------------------------------------------------------------------
     if _do_uncompressed:
+        uncompressed = _uncompressed_path(path)
         print(f"[ZMAP] Writing uncompressed cache → {uncompressed}")
         print("[ZMAP] (this only happens once; future loads will be much faster)")
         adata.write_h5ad(uncompressed, compression=None)
 
     # ------------------------------------------------------------------
-    # 7) Clean up if we didn't want a persistent copy
+    # 7) Clean up if not keeping persistent copy
     # ------------------------------------------------------------------
     if not write_to_disk:
         try:
