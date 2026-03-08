@@ -1663,9 +1663,6 @@ def group_siblings_vs_markers(
     genes = node_markers["gene"].astype(str).unique().tolist()
 
     # ---- 2b) Densify X[:, gene_cols] ONCE for all pre-render steps ----
-    # Steps 3, 4, 4b, and the colorscale computation all query the same gene
-    # columns. We slice the sparse matrix here and pass the dense array through
-    # via _x_dense / _x_genes to avoid repeated toarray() calls.
     _x_dense, _x_genes = _get_expression_slice(
         adata, genes, layer=layer, use_raw=use_raw
     )
@@ -1718,7 +1715,6 @@ def group_siblings_vs_markers(
 
     # ---- 4b) Reorder genes by global mean (column order) ----
     if has_sibling_block:
-        # use siblings as the reference universe at this level
         genes = reorder_genes_by_mean_expression(
             adata,
             genes,
@@ -1730,7 +1726,6 @@ def group_siblings_vs_markers(
             _x_genes=_x_genes,
         )
     else:
-        # tissue-only case
         genes = reorder_genes_by_mean_expression(
             adata,
             genes,
@@ -1748,13 +1743,12 @@ def group_siblings_vs_markers(
             node=node_str,
             siblings=siblings,
             marker_df=marker_df,
-            genes=genes,                  # <<< enforce canonical gene order here
+            genes=genes,
             support_col="support_ratio",
         )
-        # Optional: filter to genes (redundant but harmless)
         design_sib = design_sib[design_sib["gene"].isin(genes)]
-        group_color_sib = {ct: "0.4" for ct in siblings}
-        group_color_sib[node_str] = highlight_color
+        # All labels black — bold applied after render
+        group_color_sib = {ct: "black" for ct in siblings}
 
         if sibling_title is None:
             sibling_title = f"{node_str}"
@@ -1816,9 +1810,8 @@ def group_siblings_vs_markers(
     else:
         design_tiss["support_ratio"] = np.nan
 
-    group_color_tiss = {t: "0.4" for t in tissues}
-    if node_str in tissues:
-        group_color_tiss[node_str] = highlight_color
+    # All labels black — bold applied after render
+    group_color_tiss = {t: "black" for t in tissues}
 
     if tissue_title is None:
         tissue_title = f"Tissue context for node = {node_str}"
@@ -1826,7 +1819,6 @@ def group_siblings_vs_markers(
     # ---- 5c) Sanity check: ensure gene order matches between sibling & tissue blocks ----
     if has_sibling_block and design_sib is not None:
         def _ordered_genes(df: pd.DataFrame) -> list[str]:
-            # preserve first-occurrence order of 'gene' values
             return list(dict.fromkeys(df["gene"].astype(str).tolist()))
 
         sib_genes_order = _ordered_genes(design_sib)
@@ -1839,7 +1831,7 @@ def group_siblings_vs_markers(
                 f"tiss_genes: {tiss_genes_order}"
             )
 
-    # ---- 6) Figure sizing: keep per-row and per-col spacing consistent ----
+    # ---- 6) Figure sizing ----
     n_cols = len(genes)
     n_rows_sib = len(siblings) if has_sibling_block else 0
     n_rows_tiss = len(tissues)
@@ -1875,7 +1867,6 @@ def group_siblings_vs_markers(
     ax_leg.axis("off")
 
     # ---- 8) Optional: global colorscale (vmin/vmax) across both panels ----
-    # Computed directly from group-mean matrices — no throwaway renders needed.
     vmin_global = vmax_global = None
     if enforce_global_colorscale:
         panels: list[tuple[list[str], str]] = []
@@ -1942,6 +1933,13 @@ def group_siblings_vs_markers(
         )
         ax_sib.tick_params(axis="x", labelbottom=False)
 
+        # Bold the focal node in the sibling panel
+        for lab in ax_sib.get_yticklabels():
+            base_name = lab.get_text().split(" (")[0].split(" •")[0]
+            if base_name == node_str:
+                lab.set_fontweight("bold")
+                break
+
     # ---- 10) Draw tissue block (bottom) ----
     ax_tiss, grid_tiss = plot_dotplot_design_fullgrid(
         adata,
@@ -1969,14 +1967,11 @@ def group_siblings_vs_markers(
         **dotplot_kwargs,
     )
 
-    # ---- 11) Bold the parent tissue row (if applicable) ----
-    if parent_label is not None and "ZMAP_Tissue" in adata.obs.columns:
-        for lab in ax_tiss.get_yticklabels():
-            txt = lab.get_text()
-            base_name = txt.split(" (")[0].split(" •")[0]
-            if base_name == parent_label:
-                lab.set_fontweight("bold")
-                break
+    # ---- 11) Bold the parent tissue and/or focal node in the tissue panel ----
+    for lab in ax_tiss.get_yticklabels():
+        base_name = lab.get_text().split(" (")[0].split(" •")[0]
+        if base_name == parent_label or base_name == node_str:
+            lab.set_fontweight("bold")
 
     # ---- 12) Duplicate gene labels at top ----
     xticks = ax_tiss.get_xticks()
@@ -1994,51 +1989,39 @@ def group_siblings_vs_markers(
     top_ax.tick_params(axis="x", which="both", length=0)
     top_ax.set_xlabel("")
 
-    # -----------------------------------------------------------
-    # Centered title for ZMAP_Tissue nodes (single-panel version)
-    # -----------------------------------------------------------
+    # ---- 13) Centered title for ZMAP_Tissue nodes (single-panel version) ----
     if level_col == "ZMAP_Tissue":
         anchor_ax = ax_sib if ax_sib is not None else ax_tiss
 
         if anchor_ax is not None:
-            # 1. Measure the xtick label height (in inches)
             fig = anchor_ax.figure
-            fig.canvas.draw()  # needed so the renderer exists
+            fig.canvas.draw()
             renderer = fig.canvas.get_renderer()
 
-            # get bounding boxes of all xtick labels
             bboxes = [lbl.get_window_extent(renderer=renderer) for lbl in anchor_ax.get_xticklabels()]
             if len(bboxes) > 0:
-                # convert from display coords to inches
                 max_label_height_px = max(bb.height for bb in bboxes)
                 dpi = fig.dpi
                 max_label_height_in = max_label_height_px / dpi
             else:
                 max_label_height_in = 0.0
 
-            # 2. Add some extra cushion (in inches)
-            extra_gap_in = 0.05  # minimal headroom
+            extra_gap_in = 0.05
             required_pad = max_label_height_in + extra_gap_in
 
-            # 3. Create a sibling axes ABOVE the dotplot, padded enough
             title_ax = _add_top_sibling_axes(
                 anchor_ax,
-                height_in=0.28,      # height of the title band
-                pad_in=required_pad  # auto-lift by measured xtick height
+                height_in=0.28,
+                pad_in=required_pad,
             )
             title_ax.set_axis_off()
-
-            # 4. Center the title horizontally and vertically
             title_ax.text(
-                0.5, 0.55,                   # centered within the band
-                f"{level_col} = {node}",     # displayed title
+                0.5, 0.55,
+                f"{level_col} = {node}",
                 fontsize=10,
                 ha="center",
                 va="center",
             )
-
-
-
 
     return fig, ax_sib, ax_tiss, (grid_sib, grid_tiss), marker_df
 
