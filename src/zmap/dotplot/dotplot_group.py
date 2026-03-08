@@ -2048,11 +2048,11 @@ def group_siblings_vs_markers(
 
 def group_descendants_vs_markers(
     adata: ad.AnnData,
-    parent: Optional[str] = 'neurectoderm',                     # NEW: the selected parent group (e.g., a Tissue or CellType)
+    parent: Optional[str] = None,                     # NEW: the selected parent group (e.g., a Tissue or CellType)
     *,
     # ---- Hierarchy columns (parent/child) ----
-    parent_col: str = "ZMAP_GermLayer",                # NEW: higher-level obs column (e.g., ZMAP_Tissue or ZMAP_CellType)
-    child_col: str = "ZMAP_CellType",                  # NEW: lower-level obs column used for rows (e.g., ZMAP_Cluster or leiden_100)
+    parent_col: str = None,                # NEW: higher-level obs column (e.g., ZMAP_Tissue or ZMAP_CellType)
+    child_col: str = None,                  # NEW: lower-level obs column used for rows (e.g., ZMAP_Cluster or leiden_100)
 
     # ---- Back-compat aliases (deprecated) ----
     celltype: Optional[str] = None,                   # was the selected value at the parent level
