@@ -2300,8 +2300,8 @@ def group_descendants_vs_markers(
         duplicate_gene_columns=duplicate_gene_columns,
         show_size_legend=show_size_legend,
         cbar_bbox_to_anchor=(1.02, 0.85),
-        size_legend_bbox_to_anchor = (0.0, 0.6),
-        ring_legend_bbox_to_anchor = (0.0, 0.05),
+        size_legend_bbox_to_anchor = (0.0, 0.65),
+        ring_legend_bbox_to_anchor = (0.0, 0.02),
         **dotplot_kwargs,
     )
 
