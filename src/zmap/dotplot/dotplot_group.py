@@ -1581,7 +1581,7 @@ def group_siblings_vs_markers(
     min_support_ratio: float | None = None,
     min_log2fc: float | None = None,
     min_enrich: float | None = None,
-    omit_unannotated: bool = False,
+    omit_unannotated: bool = True,
 
     # expression source
     layer: str | None = "tpm_log",
@@ -2072,7 +2072,7 @@ def group_descendants_vs_markers(
     min_support_ratio: Optional[float] = None,
     min_log2fc: Optional[float] = None,
     min_enrich: Optional[float] = None,
-    omit_unannotated: bool = False,
+    omit_unannotated: bool = True,
 
     # ---- group filtering ----
     min_cells_per_group: Optional[int] = None,
