@@ -682,8 +682,8 @@ def plot_dotplot_design_fullgrid(
     vmax: float | None = None,
     standard_scale: str | None = None,       # None | "var" | "obs"
     size_mode: str = "sqrt",               # "sqrt" or "linear"
-    s_min: float = 2,
-    s_max: float = 40,
+    s_min: float = 1,
+    s_max: float = 80,
     # row label suffix
     rowlabel_append_child_counts: bool = True,
     rowlabel_child_col: str = "ZMAP_Cluster",
@@ -699,7 +699,7 @@ def plot_dotplot_design_fullgrid(
 
     # ===================== DOT SIZE LEGEND =====================
     show_size_legend: bool = True,
-    size_legend_fracs: tuple = (0.1, 0.25, 0.5, 0.75, 1.0),
+    size_legend_fracs: tuple = (1.0, 0.75, 0.5, 0.25, 0.1),
     size_legend_title: str = "Fraction\nexpressing",
     size_legend_loc: str = "upper left",
     size_legend_bbox_to_anchor: tuple | None = (0.0, 0.7),
@@ -713,7 +713,7 @@ def plot_dotplot_design_fullgrid(
 
     # ===================== SUPPORT RING LEGEND =====================
     show_ring_legend: bool = True,
-    ring_legend_fracs: tuple = (0, 0.5, 1.0),
+    ring_legend_fracs: tuple = (1, 0.5, 0.1),
     ring_legend_title: str = "Consensus\nsupport",
     ring_legend_loc: str = "lower left",
     ring_legend_bbox_to_anchor: tuple | None = (0.0, 0.25),
@@ -1757,10 +1757,7 @@ def group_siblings_vs_markers(
         group_color_sib[node_str] = highlight_color
 
         if sibling_title is None:
-            if parent_col is not None and parent_label is not None:
-                sibling_title = f"{level_col} = {node_str}\nparent[{parent_col}] = {parent_label}"
-            else:
-                sibling_title = f"{level_col} = {node_str}"
+            sibling_title = f"{node_str}"
     else:
         design_sib = None
         group_color_sib = {}
