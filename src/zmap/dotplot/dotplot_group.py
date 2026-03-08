@@ -1084,9 +1084,9 @@ def plot_dotplot_design_fullgrid(
     ax.set_ylim(len(row_order) - 0.5, -0.5)
 
     ax.set_xticks(range(col_count))
-    xt = ax.set_xticklabels(col_labels, rotation=xlabel_rotation, ha="center", fontsize=8)
+    xt = ax.set_xticklabels(col_labels, rotation=xlabel_rotation, ha="center", fontsize=10)
     ax.set_yticks(range(len(row_order)))
-    yt = ax.set_yticklabels(row_order, fontsize=8)
+    yt = ax.set_yticklabels(row_order, fontsize=10)
 
     # Append child counts / leaf marker
     if rowlabel_append_child_counts:
@@ -1110,7 +1110,7 @@ def plot_dotplot_design_fullgrid(
             else:
                 lbl = rowlabel_fmt.format(name=r, n=n)
             display_labels.append(lbl)
-        ax.set_yticklabels(display_labels, fontsize=8)
+        ax.set_yticklabels(display_labels, fontsize=10)
 
         if left_time_strip:
             # Convert ticklabel gap from points → inches
