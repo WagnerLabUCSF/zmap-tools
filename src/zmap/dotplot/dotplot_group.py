@@ -1992,7 +1992,7 @@ def group_siblings_vs_markers(
         xlabels,
         rotation=90,
         ha="center",
-        fontsize=8,
+        fontsize=10,
     )
     top_ax.tick_params(axis="x", which="both", length=0)
     top_ax.set_xlabel("")
@@ -2129,12 +2129,14 @@ def group_descendants_vs_markers(
         child_col = cluster_col
 
     # -------------------- 1) derive group_order from obs only (no copy yet) ------
+    if parent is None:
+        raise ValueError("`parent` must be provided (e.g., a specific Tissue or CellType label).")
+    if parent_col is None:
+        parent_col = find_level_for_node(adata, str(parent))
     if parent_col not in adata.obs.columns:
         raise KeyError(f"{parent_col!r} not found in adata.obs columns.")
     if child_col not in adata.obs.columns:
         raise KeyError(f"{child_col!r} not found in adata.obs columns.")
-    if parent is None:
-        raise ValueError("`parent` must be provided (e.g., a specific Tissue or CellType label).")
 
     parent_mask = adata.obs[parent_col].astype(str) == str(parent)
     if parent_mask.sum() == 0:
