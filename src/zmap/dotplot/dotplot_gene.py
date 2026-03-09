@@ -1583,4 +1583,4 @@ def gene_groups_vs_time_and_studies(
     if not show:
         plt.close(fig)
 
-    return (ax_left, ax_right), (long_time, long_study)
+    return fig, (ax_left, ax_right), (long_time, long_study)
