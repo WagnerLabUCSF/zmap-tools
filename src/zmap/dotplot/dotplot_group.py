@@ -693,7 +693,7 @@ def plot_dotplot_basegrid(
     xlabel_rotation: int = 90,
     title: str | None = None,
     add_colorbar: bool = True,
-    cbar_title: str = "log(tpm)\nCounts",
+    cbar_title: str = "log(tpm)\ncounts",
     cbar_title_fontsize: float = 8.0,
     cbar_ticklabel_fontsize: float = 8.0,
     xticklabel_fontsize: float = 10.0,
@@ -702,7 +702,7 @@ def plot_dotplot_basegrid(
     # ===================== DOT SIZE LEGEND =====================
     show_size_legend: bool = True,
     size_legend_fracs: tuple = (1.0, 0.75, 0.5, 0.25, 0.1),
-    size_legend_title: str = "Fraction\nexpressing",
+    size_legend_title: str = "Fraction\nExpressing",
     size_legend_loc: str = "upper left",
     size_legend_bbox_to_anchor: tuple | None = (0.0, 0.7),
     size_legend_label_fmt: str = "{:.0%}",
@@ -1596,7 +1596,7 @@ def group_siblings_vs_markers(
     enforce_global_colorscale: bool = True,
 
     # layout / sizing
-    width_per_gene: float = 0.02,
+    width_per_gene: float = 0.04,
     height_per_group: float = 0.2,
     min_figsize: tuple[float, float] = (0.5, 0.5),
     max_figsize: tuple[float, float] = (25.0, 25.0),
@@ -1931,7 +1931,6 @@ def group_siblings_vs_markers(
             ax=ax_sib,
             ax_leg=ax_leg,
             adjust_right_gutter=False,
-            width_per_gene=0.04,
             rowlabel_append_child_counts=False, 
             **dotplot_kwargs,
         )
@@ -1968,7 +1967,6 @@ def group_siblings_vs_markers(
         ax=ax_tiss,
         ax_leg=ax_leg,
         adjust_right_gutter=False,
-        width_per_gene=0.04,
         rowlabel_append_child_counts=False, 
         **dotplot_kwargs,
     )
@@ -2288,9 +2286,9 @@ def group_descendants_vs_markers(
         group_color_dict=None if group_color_dict is None else dict(group_color_dict),
         duplicate_gene_columns=duplicate_gene_columns,
         show_size_legend=show_size_legend,
-#        cbar_bbox_to_anchor=(1.02, 0.8),
-#        size_legend_bbox_to_anchor = (0.0, 0.55),
-#        ring_legend_bbox_to_anchor = (0.0, 0.02),
+        cbar_bbox_to_anchor=(1.04, 0.8),
+        size_legend_bbox_to_anchor = (0.0, 0.6),
+        ring_legend_bbox_to_anchor = (0.0, 0.02),
         **dotplot_kwargs,
     )
 
