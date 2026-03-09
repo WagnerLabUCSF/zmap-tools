@@ -226,18 +226,78 @@ def load_zmap_h5ad(
     attempt_preprocess_tpmlog: bool = True,
 ) -> ad.AnnData:
     """
-    High-level loader for ZMAP H5ADs.
+    Load a ZMAP reference dataset into memory, downloading it if necessary.
+
+    This is the primary entry point for accessing ZMAP reference data. On first
+    call the file is downloaded and cached to Google Drive (if mounted) or a
+    local directory. Subsequent calls in the same session are served from an
+    in-memory cache and return instantly.
 
     Load priority (fastest to slowest):
-        1. In-memory _H5AD_CACHE  (same session, instantaneous)
-        2. Cached .h5ad on Drive  (warm cache, no download needed)
-        3. Fresh download
+
+    1. In-memory session cache — instantaneous, no I/O.
+    2. File already on disk (Drive or local) — fast, no download.
+    3. Fresh download from the ZMAP CDN.
+
+    Parameters
+    ----------
+    kind : str or None, default ``"processed_slim_tpm"``
+        Preset dataset to load. One of:
+
+        - ``"processed_slim_tpm"`` — fully processed, TPM counts only.
+          Best default for visualization and label transfer.
+        - ``"processed_slim"``     — fully processed, raw counts only.
+        - ``"processed"``          — fully processed, includes intermediate layers.
+        - ``"raw"``                — raw counts, unprocessed.
+        - ``"symphony"``           — Symphony reference used for query embedding.
+          Required for ``annotate_with_zmap``.
+
+        Ignored when ``url`` is provided.
+    url : str or None, default ``None``
+        Explicit download URL. Overrides ``kind``. Use this to load a custom
+        or external H5AD not in the ZMAP registry.
+    dest_dir : path-like or None, default ``None``
+        Directory where the H5AD file is saved. Defaults to
+        ``/content/drive/MyDrive/zmap/h5ad`` when Google Drive is mounted,
+        or ``<cwd>/zmap/h5ad`` otherwise.
+    filename : str or None, default ``None``
+        Override the filename used when saving to disk. Inferred from the
+        registry or URL when not provided.
+    write_to_disk : bool, default ``True``
+        If ``False``, downloads to a temporary file that is deleted after
+        loading. Useful for one-off loads when disk space is constrained.
+        Incompatible with ``backed=True``.
+    use_cache : bool, default ``True``
+        If ``True``, return the cached in-memory object on repeat calls.
+        Set to ``False`` to force a fresh load from disk (e.g. after
+        modifying the file externally).
+    force_download : bool, default ``False``
+        Re-download the file even if it already exists on disk.
+    backed : bool or str, default ``False``
+        Open the H5AD in backed (memory-mapped) mode. Pass ``True`` for
+        read-only (``"r"``), or a mode string (e.g. ``"r+"``) for
+        read-write. Backed mode avoids loading the full matrix into RAM
+        but is slower for random access. Requires ``write_to_disk=True``.
+    chunk_size : int, default ``1 << 20`` (1 MB)
+        Download chunk size in bytes.
+    show_progress : bool, default ``True``
+        Display a ``tqdm`` progress bar while downloading.
+    attempt_preprocess_tpmlog : bool, default ``True``
+        If the loaded object has a ``raw_nolog`` layer but no ``tpm_log``
+        layer, compute ``tpm_log`` via TPM normalization + log1p and add
+        it as a layer. Has no effect if ``tpm_log`` is already present or
+        if ``backed=True``.
+
+    Returns
+    -------
+    anndata.AnnData
+        The loaded reference dataset.
 
     Examples
     --------
-    adata = load_zmap_h5ad(kind="processed_slim_tpm")
-    adata = load_zmap_h5ad(kind="symphony")
-    adata = load_zmap_h5ad(url="https://.../my_custom.h5ad", filename="my_custom.h5ad")
+    >>> adata_ref = zmap.ref.load_zmap_h5ad()                          # default: processed_slim_tpm
+    >>> adata_ref = zmap.ref.load_zmap_h5ad(kind="symphony")           # for annotate_with_zmap
+    >>> adata_ref = zmap.ref.load_zmap_h5ad(url="https://.../my.h5ad", filename="my.h5ad")
     """
     if backed and not write_to_disk:
         print("[ZMAP] backed=True requires write_to_disk=True; overriding.")

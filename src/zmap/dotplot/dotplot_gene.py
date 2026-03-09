@@ -1201,22 +1201,97 @@ def gene_groups_vs_time_and_studies(
     return_long: bool = False,
 ):
     """
-    Two-panel dotplot of a single color feature across both (cluster × time)
-    and (cluster × study), sharing the same color scale and size mapping.
+    Two-panel dotplot showing a single gene (or obs feature) across cell types,
+    split by developmental timepoint and by study.
 
-    `color` is usually a gene name (taken from raw/layer/X), but if no gene
-    match is found it will fall back to a numeric column in `adata.obs`.
+    The left panel shows ``(cell type × timepoint)`` and the right panel shows
+    ``(cell type × study)``, both using the same color scale (mean expression)
+    and size scale (fraction of cells expressing). This makes it easy to
+    simultaneously assess temporal dynamics and cross-study reproducibility
+    for any gene of interest.
 
-    Left panel:
-        rows = clusters, columns = timepoints.
-    Right panel:
-        rows = clusters, columns = studies.
+    ``color`` is resolved first as a gene name in ``adata.var_names``; if no
+    match is found it falls back to a numeric column in ``adata.obs``.
 
-    Dot semantics (both panels)
-    ---------------------------
-    * Color: mean value per bin.
-    * Size:  fraction of cells with value > `detect_threshold`.
-    * Low-support / missing: grey at minimum size.
+    Parameters
+    ----------
+    adata : anndata.AnnData
+        Reference dataset. Must contain ``groupby``, ``time_col``, and
+        ``study_col`` in ``adata.obs``.
+    color : str
+        Gene name or numeric ``obs`` column to visualize. Gene lookup is
+        case-sensitive and must match ``adata.var_names`` exactly.
+    groupby : str, default ``"ZMAP_CellType"``
+        ``obs`` column whose categories form the rows of both panels.
+    time_col : str, default ``"time_group_id"``
+        ``obs`` column containing developmental time group labels
+        (e.g. ``"6hpf"``, ``"24hpf"``). Forms the columns of the left panel.
+    study_col : str, default ``"study_id"``
+        ``obs`` column containing dataset/study identifiers. Forms the columns
+        of the right panel.
+    layer : str or None, default ``"tpm_log"``
+        Layer in ``adata.layers`` to use for expression values. Falls back to
+        ``adata.X`` when ``None``.
+    use_raw : bool or None, default ``None``
+        If ``True``, read expression from ``adata.raw``. Overrides ``layer``.
+    detect_threshold : float, default ``0.0``
+        Minimum value for a cell to count as "expressing" when computing
+        the fraction-expressing dot size.
+    show : bool, default ``True``
+        Call ``plt.show()`` after rendering.
+    cmap : str, default ``"viridis"``
+        Matplotlib colormap for dot fill color (mean expression).
+    vmin : float or None, default ``0``
+        Minimum value for the color scale.
+    vmax : float or None, default ``None``
+        Maximum value for the color scale. Inferred from data when ``None``.
+    cbar_title : str, default ``"log(tpm)\\ncounts"``
+        Label for the colorbar.
+    add_colorbar : bool, default ``True``
+        Draw a colorbar for the mean expression scale.
+    s_min, s_max : float, default ``4.0`` and ``60.0``
+        Minimum and maximum dot sizes (in points²) for the fraction-expressing scale.
+    abs_min_cells : int, default ``10``
+        Minimum absolute number of cells in a bin to render a dot. Bins with
+        fewer cells are shown as low-support (grey).
+    rel_min_frac : float, default ``0.01``
+        Minimum fraction of the median bin size required to render a dot.
+    low_support_grey : str, default ``"0.7"``
+        Greyscale color for low-support / missing bins.
+    cell_size : float, default ``0.14``
+        Size of each data cell in both x and y dimensions, in inches.
+        Determines the aspect ratio and overall figure size when ``figsize=None``.
+    middle_gap : float, default ``0.2``
+        Gap between the left (time) and right (study) panels, in inches.
+    cluster_order : list of str or None
+        Explicit ordering of rows (cell types). Defaults to the canonical
+        ZMAP CellType order defined in the package.
+    time_order : list of str or None, default ``None``
+        Explicit ordering of timepoint columns. Inferred from data when ``None``.
+    study_order : list of str or None
+        Explicit ordering of study columns. Defaults to the canonical ZMAP
+        study order defined in the package.
+    omit_groups : list of str or None, default ``['nan', 'unknown']``
+        Cell-type labels to exclude from the rows.
+    row_color_groups : dict or None
+        ``{color: [group1, group2, ...]}`` mapping used to color row labels
+        by lineage. Defaults to the canonical ZMAP lineage color scheme.
+    row_dividers : list of int or None
+        Row indices at which to draw horizontal divider lines between lineage
+        blocks. Defaults to the canonical ZMAP lineage boundaries.
+    return_long : bool, default ``False``
+        If ``True``, also return the long-form ``pd.DataFrame`` used to
+        generate the plot.
+
+    Returns
+    -------
+    matplotlib.figure.Figure or tuple
+        The rendered figure, or ``(figure, long_df)`` when ``return_long=True``.
+
+    Examples
+    --------
+    >>> zmap.dotplot.gene_view(adata_ref, "sox2")
+    >>> zmap.dotplot.gene_view(adata_ref, "myod1", cmap="Reds", vmax=5)
     """
     color = str(color)
 

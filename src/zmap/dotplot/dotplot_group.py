@@ -1619,18 +1619,99 @@ def group_siblings_vs_markers(
     **dotplot_kwargs,
 ):
     """
-    Single-figure, two-block dotplot:
+    Two-block dotplot comparing a focal cell type to its siblings and tissues.
 
-        Top:   siblings of focal node at level_col
-        Bottom:Tissues (ZMAP_Tissue)
+    Given a focal node (e.g. ``"hepatocyte"``), this function:
 
-    Both blocks share:
-      - same columns (marker genes of the focal node)
-      - one shared right-hand legend/colorbar gutter.
+    - Fetches the consensus marker genes for that node.
+    - Plots a **sibling block** (top): all cell types sharing the same parent
+      in the ZMAP hierarchy, colored by mean expression of the focal node's markers.
+    - Plots a **tissue block** (bottom): all ``ZMAP_Tissue`` groups, showing how
+      broadly those same marker genes are expressed across tissues.
 
-    Row order (both blocks) is by descending mean expression across marker genes.
-    Rings in the bottom panel show 'support_ratio' for any (Tissue, gene) pair
-    present in the Tissue-level consensus marker table (filtered to the genes used).
+    Both blocks share the same gene columns, color scale, and right-hand legend.
+    Row order in both blocks is by descending mean expression across the marker genes.
+    Rings in the tissue block encode ``support_ratio`` from the Tissue-level
+    consensus marker table, indicating cross-study reproducibility.
+
+    Parameters
+    ----------
+    adata : anndata.AnnData
+        Reference dataset. Must contain the relevant ``obs`` columns for the
+        ZMAP hierarchy (e.g. ``ZMAP_CellType``, ``ZMAP_Tissue``).
+    node : str
+        The focal cell type or cluster whose markers and siblings to plot
+        (e.g. ``"hepatocyte"``, ``"Neurons"``).
+    level_col : str or None, default ``None``
+        ``obs`` column defining the annotation level of ``node``
+        (e.g. ``"ZMAP_CellType"``). Auto-detected from the data when ``None``.
+    parent_col : str or None, default ``None``
+        ``obs`` column defining the parent level used to identify siblings
+        (e.g. ``"ZMAP_Tissue"``). Inferred from ``level_col`` when ``None``.
+    marker_type : str, default ``"overall"``
+        Scoring criterion for selecting markers. One of
+        ``"overall"``, ``"exclusivity"``, ``"contrast"``, ``"consensus"``.
+    n_markers : int, default ``20``
+        Number of top marker genes to display as columns.
+    min_support_ratio, min_log2fc, min_enrich : float or None, default ``None``
+        Optional filters applied to the marker table before selecting genes.
+        See ``load_consensus_markers`` for definitions.
+    omit_unannotated : bool, default ``True``
+        Remove genes with unannotated/placeholder names from the marker set.
+    layer : str or None, default ``"tpm_log"``
+        Layer in ``adata.layers`` to use for expression values. Falls back to
+        ``adata.X`` when ``None``.
+    use_raw : bool or None, default ``None``
+        If ``True``, use ``adata.raw`` for expression. Overrides ``layer``.
+    highlight_color : str, default ``"black"``
+        Color used to highlight the focal node's row in the sibling block.
+    standard_scale : ``"var"``, ``"obs"``, or None, default ``None``
+        Scale expression values per gene (``"var"``) or per cell (``"obs"``)
+        before computing dot statistics. ``None`` applies no scaling.
+    cmap : str, default ``"Blues"``
+        Matplotlib colormap for dot fill color.
+    enforce_global_colorscale : bool, default ``False``
+        If ``True``, use a single shared color scale across both blocks.
+        If ``False``, each block is scaled independently.
+    width_per_gene : float, default ``0.04``
+        Figure width contribution per gene column, in inches.
+    height_per_group : float, default ``0.2``
+        Figure height contribution per row (group), in inches.
+    min_figsize, max_figsize : tuple of float
+        Hard lower and upper bounds on the auto-computed figure size.
+    hspace : float, default ``0.04``
+        Vertical gap between the sibling and tissue blocks.
+    left_time_strip : bool, default ``False``
+        Draw a developmental time distribution strip on the left margin.
+    consensus_panel : str or None, default ``None``
+        If provided, add an additional panel showing support ratios from the
+        specified consensus level (e.g. ``"Tissue"``).
+    show_size_legend : bool, default ``True``
+        Show the dot-size legend (fraction of cells expressing each gene).
+    xlabel_rotation : int, default ``90``
+        Rotation angle for gene name tick labels on the x-axis.
+    duplicate_gene_columns : bool, default ``False``
+        Repeat the gene column labels on both the top and bottom axes.
+    show_ring_legend : bool, default ``True``
+        Show the ring (support_ratio) legend in the tissue block.
+    add_colorbar : bool, default ``True``
+        Add a colorbar for mean expression.
+    sibling_title, tissue_title : str or None, default ``None``
+        Custom titles for the sibling and tissue blocks respectively.
+        Auto-generated when ``None``.
+    **dotplot_kwargs
+        Additional keyword arguments forwarded to the underlying dotplot
+        rendering functions.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The rendered figure.
+
+    Examples
+    --------
+    >>> zmap.dotplot.group_siblings_vs_markers(adata_ref, "hepatocyte")
+    >>> zmap.dotplot.group_siblings_vs_markers(adata_ref, "Neurons", n_markers=15, cmap="Reds")
     """
     node_str = str(node)
 
@@ -2095,11 +2176,106 @@ def group_descendants_vs_markers(
     **dotplot_kwargs,
 ):
     """
-    ZMAP browser for any two hierarchical levels (parent → child).
+    Dotplot showing the child groups within a parent group, colored by their marker genes.
 
-    Typical examples:
-      - parent_col="ZMAP_Tissue",  child_col="ZMAP_Cluster", parent="forebrain"
-      - parent_col="ZMAP_CellType", child_col="leiden_100",   parent="Neurons"
+    Given a parent label (e.g. ``"forebrain"`` at the Tissue level), plots all
+    child groups at the next level down (e.g. Clusters or Leiden clusters) as
+    rows, with each child group's consensus marker genes as columns. Gene columns
+    are ordered by child group, and rows are optionally ordered by a dendrogram
+    computed over mean expression profiles.
+
+    Typical usage:
+
+    - ``parent_col="ZMAP_Tissue"``,   ``child_col="ZMAP_Cluster"``,  ``parent="forebrain"``
+    - ``parent_col="ZMAP_CellType"``, ``child_col="leiden_100"``,     ``parent="Neurons"``
+
+    Parameters
+    ----------
+    adata : anndata.AnnData
+        Reference dataset. Must contain both ``parent_col`` and ``child_col``
+        in ``adata.obs``.
+    parent : str or None, default ``None``
+        The specific parent label to drill into (e.g. ``"forebrain"``).
+        Required — raises ``ValueError`` when ``None``.
+    parent_col : str or None, default ``None``
+        ``obs`` column at the parent level (e.g. ``"ZMAP_Tissue"``).
+        Auto-detected via the ZMAP hierarchy when ``None``.
+    child_col : str or None, default ``None``
+        ``obs`` column at the child level to use as rows
+        (e.g. ``"ZMAP_Cluster"``, ``"leiden_100"``). Required.
+    layer : str or None, default ``"tpm_log"``
+        Layer in ``adata.layers`` to use for expression values. Falls back to
+        ``adata.X`` when ``None``.
+    use_raw : bool or None, default ``None``
+        If ``True``, use ``adata.raw`` for expression. Overrides ``layer``.
+    marker_type : str, default ``"overall"``
+        Scoring criterion for selecting markers per child group. One of
+        ``"specificity"``, ``"contrast"``, ``"consensus"``, ``"overall"``.
+    n_markers_per_group : int or None, default ``5``
+        Number of top marker genes to display per child group as columns.
+    min_support_ratio, min_log2fc, min_enrich : float or None, default ``None``
+        Optional filters applied to the marker table. See ``load_consensus_markers``.
+    omit_unannotated : bool, default ``True``
+        Remove genes with unannotated/placeholder names from the marker set.
+    min_cells_per_group : int or None, default ``None``
+        Exclude child groups with fewer than this many cells.
+    use_dendrogram_rows : bool, default ``True``
+        Reorder rows by a hierarchical clustering dendrogram computed over
+        mean expression profiles.
+    dendrogram_metric : str, default ``"correlation"``
+        Distance metric for the row dendrogram.
+    dendrogram_method : str, default ``"average"``
+        Linkage method for the row dendrogram.
+    standard_scale : str or None, default ``"var"``
+        Scale expression per gene (``"var"``) or per cell (``"obs"``). ``None``
+        applies no scaling.
+    detect_threshold : float, default ``0.0``
+        Minimum expression value for a cell to count as "expressing" a gene
+        when computing the fraction-expressing dot size.
+    cmap : str, default ``"Blues"``
+        Matplotlib colormap for dot fill color.
+    consensus_panel : str or None, default ``None``
+        Add a panel showing support ratios from the specified consensus level.
+    group_color_dict : dict or None, default ``None``
+        ``{group_label: color}`` mapping for child group row labels.
+    duplicate_gene_columns : bool, default ``False``
+        Repeat gene column labels on both top and bottom of the figure.
+    figsize : tuple of float or None, default ``None``
+        Explicit figure size ``(width, height)`` in inches. Auto-computed when ``None``.
+    min_figsize, max_figsize : tuple of float
+        Hard bounds on the auto-computed figure size.
+    width_per_gene, height_per_group : float
+        Per-gene and per-row size contributions when auto-computing figure size.
+    s_min, s_max : float, default ``1.0`` and ``80.0``
+        Minimum and maximum dot sizes (in points²) for the fraction-expressing scale.
+    xlabel_rotation : int, default ``90``
+        Rotation angle for gene name tick labels.
+    title : str or None, default ``None``
+        Figure title. Auto-generated when ``None``.
+    show_size_legend : bool, default ``True``
+        Show the dot-size legend.
+    **dotplot_kwargs
+        Additional keyword arguments forwarded to the underlying dotplot renderer.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The rendered figure.
+
+    Notes
+    -----
+    The ``celltype``, ``celltype_col``, and ``cluster_col`` parameter names are
+    deprecated aliases for ``parent``, ``parent_col``, and ``child_col``
+    respectively, and will be removed in a future release.
+
+    Examples
+    --------
+    >>> zmap.dotplot.group_descendants_vs_markers(
+    ...     adata_ref,
+    ...     parent="forebrain",
+    ...     parent_col="ZMAP_Tissue",
+    ...     child_col="ZMAP_Cluster",
+    ... )
     """
     # -------------------- 0) Back-compat parameter resolution --------------------
     if celltype is not None and parent is None:

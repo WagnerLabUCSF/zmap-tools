@@ -225,54 +225,77 @@ def load_consensus_markers(
     format: Literal["dict", "sets", "table", "panel"] = "dict",
 ) -> Any:
     """
-    Load ZMAP consensus markers for a chosen reference level.
+    Load ZMAP consensus marker genes for a chosen annotation level.
+
+    Marker tables are downloaded on first call and cached locally (on Google
+    Drive when mounted, otherwise in ``~/.cache/zmap_tools``). Subsequent
+    calls within the same session are served from an in-memory cache.
 
     Parameters
     ----------
-    level
-        Which annotation level to load:
-        {"Tissue", "CellType", "Cluster", "Leiden100"}.
-    groups
-        Optional subset of groups (e.g. only certain tissues/cell types).
-        Uses the `celltype` column in the table, which is the "group" at that level.
-    marker_type
-        Which ranking column to use when selecting top markers:
+    level : str, default ``"CellType"``
+        Annotation level whose marker table to load. One of:
 
-        - "specificity" -> use 'rank_specificity'
-        - "contrast"    -> use 'rank_contrast'
-        - "consensus"   -> use 'rank_consensus'
-        - "prevalence"   -> use 'rank_prevalence'
-        - "overall"     -> use 'overall_rank'
+        - ``"GermLayer"``    — broad germ-layer groupings.
+        - ``"Tissue"``       — tissue-level groupings.
+        - ``"CellType"``     — cell-type-level groupings (default).
+        - ``"CellTypeFine"`` — fine-grained cell-type groupings.
+        - ``"Cluster"``      — cluster-level groupings.
+        - ``"Leiden100"``    — Leiden resolution-100 cluster groupings.
 
-    n_per_group
-        Number of markers to return per group. If None, return all markers
-        passing the filters for each group.
-    min_support_ratio
-        If provided, keep only rows with support_ratio >= this value.
-    min_log2fc
-        If provided, keep only rows with global_log2fc >= this value.
-    min_enrich
-        If provided, keep only rows with enrich_mean >= this value.
-    omit_unannotated
-        If True, remove genes that look like unannotated/placeholder IDs
-        (Ensembl IDs, si:, zgc:, LOC..., linc..., wu:, bx..., GRCz...).
-    format
-        Output format:
+    groups : sequence of str or None, default ``None``
+        Restrict output to a specific subset of groups at the chosen level
+        (e.g. ``["Neurons", "hepatocyte"]``). Returns all groups when ``None``.
+    marker_type : str, default ``"overall"``
+        Scoring criterion used to rank and select markers. One of:
 
-        - "dict"  -> {group: [marker1, marker2, ...]}
-        - "sets"  -> {group: set([...])}
-        - "table" -> filtered long-form DataFrame
-        - "panel" -> small DataFrame with columns ["group", "gene"]
+        - ``"overall"``      — composite overall rank (recommended default).
+        - ``"specificity"``  — ranked by how exclusively a gene marks one group.
+        - ``"contrast"``     — ranked by expression contrast vs. other groups.
+        - ``"consensus"``    — ranked by agreement across studies/datasets.
+        - ``"prevalence"``   — ranked by fraction of cells expressing the gene.
+
+    n_per_group : int or None, default ``50``
+        Maximum number of markers to return per group, taken from the top of
+        the chosen ``marker_type`` ranking. Pass ``None`` to return all markers
+        that pass the active filters.
+    min_support_ratio : float or None, default ``None``
+        Minimum ``support_ratio`` value required to retain a marker. Filters out
+        genes that are not consistently expressed across studies.
+    min_log2fc : float or None, default ``None``
+        Minimum ``global_log2fc`` (fold-change vs. all other groups) required
+        to retain a marker.
+    min_enrich : float or None, default ``None``
+        Minimum ``enrich_mean`` (mean enrichment score) required to retain a marker.
+    omit_unannotated : bool, default ``False``
+        If ``True``, remove genes with unannotated or placeholder names, including
+        Ensembl IDs (``ENSDARG...``) and common zebrafish prefixes such as
+        ``si:``, ``zgc:``, ``LOC``, ``linc``, ``wu:``, ``bx``, ``GRCz``.
+    format : str, default ``"dict"``
+        Output format. One of:
+
+        - ``"dict"``  — ``{group: [gene1, gene2, ...]}``
+        - ``"sets"``  — ``{group: {gene1, gene2, ...}}``
+        - ``"table"`` — full filtered ``pd.DataFrame`` with all scoring columns.
+        - ``"panel"`` — minimal ``pd.DataFrame`` with columns ``["group", "gene"]``,
+          suitable for passing directly to dotplot functions.
 
     Returns
     -------
-    object
-        Depends on `format`:
+    dict or pd.DataFrame
+        Structure depends on ``format``:
 
-        - dict:  Dict[str, List[str]]
-        - sets:  Dict[str, Set[str]]
-        - table: pd.DataFrame
-        - panel: pd.DataFrame
+        - ``"dict"``  → ``Dict[str, List[str]]``
+        - ``"sets"``  → ``Dict[str, Set[str]]``
+        - ``"table"`` → ``pd.DataFrame``
+        - ``"panel"`` → ``pd.DataFrame`` with columns ``["group", "gene"]``
+
+    Examples
+    --------
+    >>> markers = zmap.ref.load_consensus_markers()                          # all CellType markers
+    >>> markers = zmap.ref.load_consensus_markers(level="Tissue", n_per_group=10)
+    >>> markers = zmap.ref.load_consensus_markers(groups=["Neurons", "hepatocyte"])
+    >>> df = zmap.ref.load_consensus_markers(format="panel")                # for dotplot
     """
     df = _load_marker_table(level)
 

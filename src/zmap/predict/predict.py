@@ -48,14 +48,59 @@ def preprocess_adata_query(
     strict_counts: bool = False,     # if True: error on non-count-ish data
 ) -> ad.AnnData:
     """
-    Prepare adata_query for ZMAP/Symphony:
+    Normalize raw counts in a query AnnData for ZMAP/Symphony label transfer.
 
-      - Requires explicit location of raw counts.
-      - Ignores other layers.
-      - Performs library-size normalization to `target_sum`.
-      - Applies log1p.
-      - Writes the result into adata.X.
-      - Records metadata in adata.uns['ZMAP_preprocessing'].
+    Reads raw counts from the specified location, performs library-size
+    normalization (TPM-style) followed by log1p, and writes the result into
+    ``adata.X``. Preprocessing metadata is recorded in
+    ``adata.uns['ZMAP_preprocessing']['query']``.
+
+    This function is called automatically by ``annotate_with_zmap`` when
+    ``do_preprocess=True``. Call it manually only if you need fine-grained
+    control over normalization before running the pipeline.
+
+    Parameters
+    ----------
+    adata_query : anndata.AnnData
+        Query dataset. Modified in-place when ``inplace=True``.
+    counts_source : str
+        Where raw integer counts are stored. Pass ``"X"`` to use ``adata.X``,
+        or a layer name (e.g. ``"counts"``) to use ``adata.layers[counts_source]``.
+        This parameter is required and has no default — you must be explicit.
+    target_sum : float, default ``1e6``
+        Library size each cell is normalized to before log1p. The default
+        produces TPM-scale values (counts per million).
+    inplace : bool, default ``True``
+        If ``True``, modify ``adata_query`` in-place and return it.
+        If ``False``, operate on a copy and return the copy.
+    integer_tol : float, default ``1e-3``
+        Tolerance used when checking whether values are integer-like. Values
+        deviating from the nearest integer by more than this amount count
+        towards the non-integer fraction.
+    strict_counts : bool, default ``False``
+        If ``True``, raise a ``ValueError`` when the data contains NaN/inf,
+        negative values, or appears non-integer-like (> 1% of non-zero values
+        deviate from an integer). If ``False``, emit a warning instead.
+
+    Returns
+    -------
+    anndata.AnnData
+        The preprocessed AnnData (same object when ``inplace=True``).
+
+    Raises
+    ------
+    KeyError
+        If ``counts_source`` is not ``"X"`` and is not found in ``adata.layers``.
+    TypeError
+        If the raw data is not numeric.
+    ValueError
+        If ``strict_counts=True`` and data quality checks fail.
+
+    Notes
+    -----
+    After this call, ``adata.X`` contains log-normalized (TPM + log1p) values
+    regardless of what was in ``adata.X`` before. The original counts in
+    ``counts_source`` are not modified.
     """
     if not inplace:
         adata = adata_query.copy()
@@ -200,11 +245,103 @@ def predict_labels_kNN(
     apply_filters: bool = True,
 ):
     """
-    kNN label transfer with pre-masking of reference cells prior to kNN construction.
+    Transfer cell-type labels from a reference to a query dataset using kNN voting.
 
-    Key change vs. earlier versions:
-    - We filter the reference (omit_labels / NaNs) BEFORE building the kNN index.
-      This keeps the voting denominator at exactly k and restores clean 1/k probability steps.
+    Builds a kNN index over the reference embedding, votes on labels using
+    distance-weighted nearest neighbors, and writes per-cell predictions and
+    confidence scores into ``adata_query.obs``. Reference cells with excluded
+    labels (``omit_labels``) are removed from the index *before* building it,
+    ensuring clean 1/k probability steps in the vote tallies.
+
+    Results are stored under ``adata_query.uns['zmap_labels'][label_space]``.
+
+    Parameters
+    ----------
+    adata_query : anndata.AnnData
+        Query dataset to annotate.
+    adata_ref : anndata.AnnData
+        Reference dataset providing labels and the embedding basis.
+    ref_label_col : str
+        Column in ``adata_ref.obs`` containing the labels to transfer.
+    label_space : str or None, default ``None``
+        Namespace used for output columns and ``uns`` keys. Defaults to
+        ``ref_label_col`` when ``None``.
+    query_truth_col : str or None, default ``None``
+        Optional ground-truth label column in ``adata_query.obs`` used for
+        evaluation metrics when ``evaluate=True``.
+    ref_basis : str, default ``"X_pca_harmony"``
+        ``obsm`` key in ``adata_ref`` containing the reference embedding.
+    query_basis : str, default ``"X_pca_harmony"``
+        ``obsm`` key in ``adata_query`` containing the query embedding.
+    label_suffix : str or None, default ``None``
+        Suffix appended to the predicted label column name in ``adata_query.obs``.
+    time_labels : str, default ``"time_id"``
+        Column in ``adata_ref.obs`` containing numeric developmental time values
+        for time-score aggregation.
+    n_neighbors : int, default ``25``
+        Number of nearest neighbors used for voting.
+    metric : str, default ``"cosine"``
+        Distance metric for the kNN index. Passed directly to the underlying
+        nearest-neighbor library.
+    omit_labels : list of str or None, default ``['unknown', 'nan', 'unassigned']``
+        Labels in ``ref_label_col`` to exclude from the kNN index entirely.
+        Cells carrying these labels are removed before index construction.
+    class_balance : str or None, default ``None``
+        Strategy for reweighting votes by class frequency. ``None`` applies no
+        reweighting; ``"global_inverse"`` upweights underrepresented classes.
+    time_balance : str or None, default ``None``
+        Strategy for reweighting votes by time-point frequency. Options mirror
+        ``class_balance``.
+    balance_gamma : float, default ``1``
+        Exponent applied to inverse-frequency weights. Higher values increase
+        the strength of balancing.
+    time_stat_function : str, default ``"trimmed_mean"``
+        Aggregation function for predicting a continuous time score per cell.
+        One of ``"mean"``, ``"median"``, ``"trimmed_mean"``, ``"winsor_mean"``.
+    time_trim_alpha : float, default ``0.25``
+        Trim fraction used when ``time_stat_function="trimmed_mean"``.
+        Must be in ``[0, 0.5)``.
+    time_winsor_alpha : float, default ``0.25``
+        Winsorization fraction used when ``time_stat_function="winsor_mean"``.
+        Must be in ``[0, 0.5)``.
+    time_distance : str or None, default ``"gaussian"``
+        Distance weighting scheme applied to neighbors when computing the time
+        score. ``None`` uses uniform weights; ``"gaussian"`` applies a Gaussian
+        kernel; ``"inverse"`` uses inverse-distance weights.
+    time_sigma : float or None, default ``None``
+        Bandwidth for the Gaussian kernel. If ``None``, uses the per-cell
+        median neighbor distance.
+    evaluate : bool, default ``False``
+        Compute accuracy and other evaluation metrics against ``query_truth_col``.
+        Requires ``query_truth_col`` to be set.
+    plot_eval_curves : bool, default ``False``
+        Plot confidence-threshold curves when ``evaluate=True``.
+    plot_mapping_qc : bool, default ``True``
+        Plot per-cell confidence and distance QC distributions after prediction.
+    save_mapping_qc : bool, default ``True``
+        Save QC plots to ``./zmap/predict/``.
+    p_thresh : float or None, default ``0.8``
+        Minimum vote probability required to assign a label. Cells below this
+        threshold are marked as unassigned.
+    d_thresh : float or None, default ``0.1``
+        Maximum allowable mean distance to neighbors. Cells exceeding this
+        threshold are marked as low-confidence.
+    min_cells_per_label : int, default ``15``
+        Minimum number of reference cells a label must have to be included in
+        voting. Labels with fewer cells are treated as ``omit_labels``.
+    apply_filters : bool, default ``True``
+        Apply ``p_thresh`` and ``d_thresh`` filters to produce the final
+        predicted label column. Set to ``False`` to retain raw predictions.
+
+    Returns
+    -------
+    None
+        Results are written directly into ``adata_query``:
+
+        - ``adata_query.obs[f"{label_space}_predicted"]`` — predicted labels.
+        - ``adata_query.obs[f"{label_space}_prob"]``      — top-label vote probability.
+        - ``adata_query.obs["ZMAP_time_id"]``             — predicted developmental time.
+        - ``adata_query.uns['zmap_labels'][label_space]`` — full run metadata.
     """
 
     # ---------- helpers ----------
@@ -792,8 +929,38 @@ def predict_labels_kNN(
 
 def summarize_knn_run(adata_query, label_key):
     """
-    Backward-compatible summary of prediction run stored in:
-        adata_query.uns['zmap_labels'][label_key]['Run Summary']
+    Return a concise summary table for a completed kNN label-transfer run.
+
+    Reads the run metadata stored in
+    ``adata_query.uns['zmap_labels'][label_key]`` and formats the key
+    statistics as a two-column ``DataFrame``.
+
+    Parameters
+    ----------
+    adata_query : anndata.AnnData
+        Query dataset that has been annotated by ``predict_labels_kNN`` or
+        ``annotate_with_zmap``.
+    label_key : str
+        The ``label_space`` used when the prediction was run (matches the key
+        under ``adata_query.uns['zmap_labels']``).
+
+    Returns
+    -------
+    pd.DataFrame
+        Two-column table with columns ``["Key", "Value"]`` containing:
+
+        - ``label_space``   — label namespace used.
+        - ``n_neighbors``   — number of neighbors in the kNN run.
+        - ``metric``        — distance metric used.
+        - ``p_thresh``      — probability threshold applied.
+        - ``n_assigned``    — number of cells that received a label.
+        - ``pct_assigned``  — percentage of cells that received a label.
+
+    Raises
+    ------
+    KeyError
+        If ``label_key`` is not found in ``adata_query.uns['zmap_labels']``,
+        or if the run metadata is missing a ``"Run Summary"`` entry.
     """
     try:
         d = adata_query.uns['zmap_labels'][label_key]
@@ -856,7 +1023,61 @@ def plot_colorbar_histogram(
     ax=None,
 ):
     """
-    Horizontal histogram strip used for time distribution visualization.
+    Plot a colorbar-styled horizontal histogram strip for a distribution of values.
+
+    Renders a single thin bar in which each bin is colored by bin density using
+    a colormap, giving a compact "colorbar histogram" suitable for showing
+    developmental time distributions alongside UMAP embeddings.
+
+    Used internally by ``plot_embedding_with_ondata_labels`` to draw the
+    vertical time strip, but can also be called standalone.
+
+    Parameters
+    ----------
+    values : array-like
+        Numeric values to histogram (e.g. predicted time in hpf). Non-finite
+        values are handled according to ``nan_policy``.
+    bins : int or array-like, default ``100``
+        Number of histogram bins, or explicit bin edges.
+    hist_range : tuple of float or None, default ``None``
+        ``(min, max)`` range for the histogram. Inferred from data when ``None``.
+    value_min, value_max : float or None, default ``None``
+        If provided, clip values to ``[value_min, value_max]`` before binning.
+        Also sets ``hist_range`` when both are given and ``hist_range`` is ``None``.
+    cmap : str, default ``"Greys"``
+        Matplotlib colormap name used to color bins by density.
+    vmin, vmax : float, default ``0.0`` and ``1.0``
+        Colormap normalization range (applied to normalized bin counts).
+    bar_height : float, default ``1.0``
+        Height of the histogram bar in data units.
+    y_min, y_max : float, default ``0`` and ``120``
+        Y-axis limits for the plot. ``y_max`` defaults to ``y_min + bar_height``
+        when set to ``None``.
+    fig_width, fig_height : float, default ``8`` and ``0.6``
+        Figure size in inches. Only used when ``ax=None``.
+    xlabel : str, default ``"Predicted Time (hpf)"``
+        X-axis label.
+    xlabel_size, tick_label_size : float, default ``15``
+        Font sizes for the axis label and tick labels.
+    title : str or None, default ``None``
+        Optional title drawn above the strip.
+    title_size : float, default ``13``
+        Font size for the title.
+    log : bool, default ``False``
+        If ``True``, apply ``log1p`` to bin counts before coloring.
+    nan_policy : str, default ``"drop"``
+        How to handle non-finite values. Currently only ``"drop"`` is supported.
+    box : bool, default ``True``
+        Draw a bounding box around the strip.
+    box_lw, box_color : float and str, default ``1.2`` and ``"black"``
+        Line width and color for the bounding box.
+    ax : matplotlib.axes.Axes or None, default ``None``
+        Axes to draw into. If ``None``, a new figure and axes are created.
+
+    Returns
+    -------
+    matplotlib.axes.Axes
+        The axes containing the colorbar histogram strip.
     """
     if y_max is None:
         y_max = y_min + bar_height
@@ -932,7 +1153,43 @@ def sync_zmap_colors(
     unknown_color="#BDBDBD",
 ):
     """
-    Synchronize categorical color palettes across query and reference AnnData.
+    Synchronize a categorical color palette between a query and reference AnnData.
+
+    Ensures that ``adata.uns[f"{obs_key}_colors"]`` is populated and aligned
+    with the categories in ``adata.obs[obs_key]``. The palette is sourced from
+    ``adata.uns`` directly if already present, or copied from ``ref_adata``
+    if provided.
+
+    Called automatically by ``plot_embedding_with_ondata_labels``. Call manually
+    when you need consistent colors across multiple plots or custom figure code.
+
+    Parameters
+    ----------
+    adata : anndata.AnnData
+        Dataset whose color palette to set or update. Modified in-place.
+    obs_key : str, default ``"ZMAP_CellType"``
+        Column in ``adata.obs`` whose categories need a synchronized palette.
+    ref_adata : anndata.AnnData or None, default ``None``
+        Reference dataset from which to copy the palette when ``adata`` does
+        not already have one. Looks for ``ref_adata.uns[f"{ref_obs_key}_color_map"]``
+        or ``ref_adata.uns[f"{ref_obs_key}_colors"]``.
+    ref_obs_key : str or None, default ``None``
+        Column in ``ref_adata.obs`` to use as the color source. Defaults to
+        ``obs_key`` when ``None``.
+    unknown_color : str, default ``"#BDBDBD"``
+        Hex color assigned to any category not found in the palette.
+
+    Returns
+    -------
+    list of str
+        Ordered list of hex color strings, one per category in
+        ``adata.obs[obs_key].cat.categories``.
+
+    Raises
+    ------
+    KeyError
+        If no palette is found in ``adata.uns`` and ``ref_adata`` is either
+        not provided or does not contain a matching palette.
     """
     cmap_key = f"{obs_key}_color_map"
 
@@ -1029,13 +1286,76 @@ def plot_embedding_with_ondata_labels(
     return_ax: bool = False,
 ):
     """
-    Plot reference embedding + query overlay with on-data labels, synced ZMAP colors,
-    and (optionally) a rotated vertical time distribution strip on the RIGHT
-    built from ZMAP_time_id.
+    Plot a query dataset overlaid on the reference embedding, with on-data labels
+    and an optional vertical time distribution strip.
 
-    - Uses sync_zmap_colors to harmonize palettes between ref/query.
-    - Uses plot_colorbar_histogram(adata_test.obs[time_key]) drawn into a temporary
-      axis, then transposed and re-plotted as a vertical strip on the right.
+    Renders two layers: (1) the full reference embedding as a faint grey
+    background for spatial context, and (2) the query cells colored by a
+    predicted label column. Labels are drawn directly on the embedding using
+    ``adjustText`` to minimize overlap. A vertical colorbar histogram of
+    predicted developmental time (``ZMAP_time_id``) can optionally be added
+    as a strip on the right side of the figure.
+
+    Parameters
+    ----------
+    adata_ref : anndata.AnnData
+        Reference dataset, used only for the background embedding.
+    adata_test : anndata.AnnData
+        Query dataset with predicted labels to overlay.
+    color_key : str, default ``"ZMAP_Tissue_predicted"``
+        Column in ``adata_test.obs`` containing the categorical labels to color
+        and annotate. Typically a ``_predicted`` column from ``predict_labels_kNN``.
+    basis : str, default ``"X_umap"``
+        ``obsm`` key used for the 2D embedding coordinates in both datasets.
+    filter_na : bool, default ``True``
+        Drop query cells with ``NaN`` in ``color_key`` before plotting.
+    palette : dict or None, default ``None``
+        Explicit ``{label: color}`` mapping. When ``None``, the palette is
+        resolved via ``sync_zmap_colors``.
+    palette_uns_key : str or None, default ``None``
+        ``uns`` key to look up the palette in ``adata_test``. Inferred from
+        ``color_key`` when ``None``.
+    show_time_strip : bool, default ``True``
+        Draw a vertical colorbar histogram of ``adata_test.obs[time_key]``
+        on the right side of the figure.
+    time_key : str, default ``"ZMAP_time_id"``
+        Column in ``adata_test.obs`` containing predicted developmental time
+        values (hours post-fertilization) for the time strip.
+    time_strip_width_ratio : float, default ``0.03``
+        Width of the time strip as a fraction of the total figure width.
+    time_strip_kwargs : dict or None, default ``None``
+        Additional keyword arguments forwarded to ``plot_colorbar_histogram``.
+    figsize : tuple of float, default ``(6, 6)``
+        Figure size in inches ``(width, height)``.
+    dpi : int, default ``200``
+        Figure resolution.
+    ref_size, test_size : float, default ``2``
+        Scatter point sizes for reference background and query cells respectively.
+    cmap : str, default ``"jet"``
+        Colormap used for the reference background scatter.
+    legend_loc : str, default ``"on data"``
+        Where to place the category legend. ``"on data"`` draws labels directly
+        at centroid positions; other values follow matplotlib legend conventions.
+    legend_fontsize, legend_fontweight : float and str, default ``5`` and ``"normal"``
+        Font size and weight for on-data legend labels.
+    replace_underscores : bool, default ``True``
+        Replace underscores in label strings with line breaks for cleaner
+        on-data annotation.
+    adjust_expand : tuple of float, default ``(1.2, 1.5)``
+        ``(x_expand, y_expand)`` passed to ``adjustText`` for label placement.
+    match_arrow_color_to_text : bool, default ``True``
+        Color annotation arrows to match their corresponding text label.
+    show : bool, default ``False``
+        Call ``plt.show()`` after rendering.
+    save : bool, default ``True``
+        Save the figure as PNG and PDF to ``./zmap/predict/``.
+    return_ax : bool, default ``False``
+        Return the main ``matplotlib.axes.Axes`` object.
+
+    Returns
+    -------
+    matplotlib.axes.Axes or None
+        The main axes when ``return_ax=True``, otherwise ``None``.
     """
     # ---- prepare test AnnData (drop NAs on requested key, cast to categorical) ----
     if filter_na:
@@ -1273,26 +1593,61 @@ def map_query_labels(
     save_mapping=True,            # save mapping_df to CSV
 ):
     """
-    Compare two labelings in an AnnData object's .obs and compute an overlap matrix.
+    Compute and visualize the overlap between two label columns in a query AnnData.
+
+    Builds a contingency matrix comparing two categorical ``obs`` columns
+    (e.g. ZMAP predicted labels vs. Leiden clusters), applies optional
+    row- or column-wise normalization, and plots the result as a heatmap.
+    Also computes a per-group best-match mapping table.
 
     Parameters
     ----------
-    adata_query : AnnData
-        The AnnData object containing the two label columns.
+    adata_query : anndata.AnnData
+        Annotated query dataset containing both label columns.
     obs_A : str
-        Column name in adata_query.obs to use as labeling A (columns of matrix).
+        Column in ``adata_query.obs`` used as the reference labeling
+        (appears as columns in the overlap matrix).
     obs_B : str
-        Column name in adata_query.obs to use as labeling B (rows of matrix).
+        Column in ``adata_query.obs`` used as the query labeling
+        (appears as rows in the overlap matrix).
+    normalize : str or None, default ``"row"``
+        Normalization applied to the raw overlap counts before plotting.
+        One of:
 
-    Saving behavior
-    ---------------
-    - If save_plots=True → saves PNG + PDF to ./zmap/predict/
-    - If save_mapping=True → saves CSV mapping table to ./zmap/predict/
+        - ``"row"``    — each row sums to 1 (fraction of obs_B in each obs_A).
+        - ``"column"`` — each column sums to 1 (fraction of obs_A in each obs_B).
+        - ``None``     — plot raw cell counts.
+
+        ``True`` is treated as ``"row"`` and ``False`` as ``None`` for
+        backward compatibility.
+    title : str or None, default ``None``
+        Plot title. Auto-generated from ``obs_A`` and ``obs_B`` when ``None``.
+    reorder_columns : bool, default ``True``
+        Sort columns by the position of their best-matching row.
+    reorder_rows : bool, default ``True``
+        Sort rows by the position of their best-matching column.
+    cmap : matplotlib colormap, default ``plt.cm.Blues``
+        Colormap for the heatmap.
+    overlay_values : bool, default ``False``
+        Overlay numeric values in each heatmap cell.
+    vmin, vmax : float or None, default ``None``
+        Colormap normalization limits.
+    show_plot : bool, default ``True``
+        Display the plot immediately.
+    return_df : bool, default ``False``
+        Return the best-match mapping table as a ``pd.DataFrame``.
+    figsize : float, default ``8``
+        Figure size (passed as both width and height in inches).
+    save_plots : bool, default ``True``
+        Save PNG and PDF of the heatmap to ``./zmap/predict/``.
+    save_mapping : bool, default ``True``
+        Save the best-match mapping table as a CSV to ``./zmap/predict/``.
 
     Returns
     -------
-    mapping_df or None
-        Cluster-level best match table for obs_B → obs_A.
+    pd.DataFrame or None
+        When ``return_df=True``, a per-group best-match table mapping each
+        obs_B label to its most-overlapping obs_A label. ``None`` otherwise.
     """
 
     # --------------------------------------------------------------------------
@@ -1468,22 +1823,93 @@ def annotate_with_zmap(
     print_summary: bool = True,
 ) -> ad.AnnData:
     """
-    High-level ZMAP/Symphony prediction wrapper.
+    End-to-end ZMAP annotation pipeline: preprocess → embed → transfer labels → plot.
 
-    Steps
-    -----
-    1. (Optional) Preprocess query from raw counts (TPM + log1p).
-    2. (Optional) Symphony mapping + ingest.
-    3. kNN label transfer with predict_labels_kNN.
-    4. Store simple run summary in:
-         adata_query.uns['zmap_labels'][<space>]['Run Summary Simple']
-    5. Plot UMAP overlay with on-data labels:
-         plot_embedding_with_ondata_labels(adata_ref, adata_query,
-                                           color_key=ref_label_col)
-    6. (Optional) Map query labels (e.g. 'leiden') to ZMAP labels via:
-         map_labels(adata_query, obs_A=ref_label_col, obs_B=query_label_col)
-       and store mapping in:
-         adata_query.uns['zmap_labels'][<space>]['Label Mapping']
+    This is the primary entry point for annotating a new single-cell dataset
+    with ZMAP reference labels. It chains the following steps:
+
+    1. **Preprocess** — normalize raw counts to TPM + log1p (``preprocess_adata_query``).
+    2. **Embed** — map the query into the ZMAP Symphony PCA embedding and ingest
+       into the reference UMAP (requires ``symphonypy``).
+    3. **Label transfer** — kNN voting to assign cell-type, tissue, and time labels
+       (``predict_labels_kNN``).
+    4. **Summarize** — store a simplified run summary in
+       ``adata_query.uns['zmap_labels'][<space>]['Run Summary Simple']``.
+    5. **Plot** — overlay query cells on the reference UMAP with on-data labels
+       (``plot_embedding_with_ondata_labels``).
+    6. **Map labels** *(optional)* — cross-tabulate ZMAP labels against an existing
+       query labeling (e.g. Leiden clusters) via ``map_query_labels``.
+
+    Parameters
+    ----------
+    adata_query : anndata.AnnData
+        Query dataset to annotate. Modified in-place.
+    query_raw_counts_source : str
+        Where raw integer counts are stored in ``adata_query``. Pass ``"X"``
+        to use ``adata_query.X``, or a layer name (e.g. ``"counts"``) to use
+        ``adata_query.layers[query_raw_counts_source]``. Required — no default.
+    adata_ref : anndata.AnnData or None, default ``None``
+        Pre-loaded ZMAP reference object. When ``None``, the reference is loaded
+        automatically using ``load_zmap_h5ad(kind=ref_kind)``.
+    ref_kind : str, default ``"symphony"``
+        Which reference preset to load when ``adata_ref=None``. Passed to
+        ``load_zmap_h5ad``. Use ``"symphony"`` for label transfer.
+    ref_label_col : str, default ``"ZMAP_CellType"``
+        Column in the reference ``obs`` whose labels are transferred to the query.
+        Also controls which UMAP overlay plot is generated.
+    label_space : str or None, default ``None``
+        Namespace for output columns and ``uns`` keys. Defaults to ``ref_label_col``.
+    query_truth_col : str or None, default ``None``
+        Ground-truth label column in ``adata_query.obs``, used for evaluation
+        metrics when ``predict_kwargs`` includes ``evaluate=True``.
+    query_label_col : str or None, default ``None``
+        Existing label column in ``adata_query.obs`` (e.g. ``"leiden"``) to
+        cross-tabulate against the transferred ZMAP labels via ``map_query_labels``.
+        Skipped when ``None``.
+    do_preprocess : bool, default ``True``
+        Run TPM normalization + log1p on the query before mapping.
+        Set to ``False`` if ``adata_query.X`` is already log-normalized.
+    do_map_embedding : bool, default ``True``
+        Run Symphony embedding mapping. Requires ``symphonypy``. Set to ``False``
+        if the query already has a ``X_pca_harmony`` embedding.
+    do_ingest : bool, default ``True``
+        Ingest the query into the reference UMAP after Symphony mapping.
+        Only applies when ``do_map_embedding=True``.
+    preprocess_kwargs : dict or None, default ``None``
+        Extra keyword arguments forwarded to ``preprocess_adata_query``
+        (e.g. ``{"strict_counts": True}``).
+    predict_kwargs : dict or None, default ``None``
+        Extra keyword arguments forwarded to ``predict_labels_kNN``
+        (e.g. ``{"n_neighbors": 50, "p_thresh": 0.7}``).
+    print_summary : bool, default ``True``
+        Print a brief progress log and final summary to stdout.
+
+    Returns
+    -------
+    anndata.AnnData
+        The annotated query dataset (same object, modified in-place). Key
+        additions to ``adata_query``:
+
+        - ``.obs[f"{label_space}_predicted"]``  — transferred cell labels.
+        - ``.obs[f"{label_space}_prob"]``        — label confidence (0–1).
+        - ``.obs["ZMAP_time_id"]``               — predicted developmental time (hpf).
+        - ``.obsm["X_umap"]``                   — UMAP coordinates (if ingested).
+        - ``.uns['zmap_labels'][label_space]``   — full run metadata and summary.
+
+    Examples
+    --------
+    >>> adata = zmap.predict.annotate_with_zmap(
+    ...     adata_query,
+    ...     query_raw_counts_source="counts",
+    ... )
+
+    >>> adata = zmap.predict.annotate_with_zmap(
+    ...     adata_query,
+    ...     query_raw_counts_source="X",
+    ...     ref_label_col="ZMAP_Tissue",
+    ...     query_label_col="leiden",
+    ...     predict_kwargs={"n_neighbors": 50},
+    ... )
     """
 
     # Suppress UMAP "n_jobs overridden" warnings
