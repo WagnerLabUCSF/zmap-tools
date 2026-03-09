@@ -17,4 +17,4 @@ from . import predict      # zmap.predict
 ref = reference
 
 
-__all__ = ["__version__", "ref","dotplot", "predict"]
+__all__ = ["__version__", "ref", "dotplot", "predict"]
