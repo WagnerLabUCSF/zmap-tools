@@ -1596,7 +1596,7 @@ def group_siblings_vs_markers(
     enforce_global_colorscale: bool = True,
 
     # layout / sizing
-    width_per_gene: float = 0.01,
+    width_per_gene: float = 0.02,
     height_per_group: float = 0.2,
     min_figsize: tuple[float, float] = (0.5, 0.5),
     max_figsize: tuple[float, float] = (25.0, 25.0),
@@ -1931,6 +1931,8 @@ def group_siblings_vs_markers(
             ax=ax_sib,
             ax_leg=ax_leg,
             adjust_right_gutter=False,
+            width_per_gene=0.04,
+            rowlabel_append_child_counts=False, 
             **dotplot_kwargs,
         )
         ax_sib.tick_params(axis="x", labelbottom=False)
@@ -1966,6 +1968,8 @@ def group_siblings_vs_markers(
         ax=ax_tiss,
         ax_leg=ax_leg,
         adjust_right_gutter=False,
+        width_per_gene=0.04,
+        rowlabel_append_child_counts=False, 
         **dotplot_kwargs,
     )
 
@@ -2284,9 +2288,9 @@ def group_descendants_vs_markers(
         group_color_dict=None if group_color_dict is None else dict(group_color_dict),
         duplicate_gene_columns=duplicate_gene_columns,
         show_size_legend=show_size_legend,
-        cbar_bbox_to_anchor=(1.02, 0.85),
-        size_legend_bbox_to_anchor = (0.0, 0.65),
-        ring_legend_bbox_to_anchor = (0.0, 0.02),
+#        cbar_bbox_to_anchor=(1.02, 0.8),
+#        size_legend_bbox_to_anchor = (0.0, 0.55),
+#        ring_legend_bbox_to_anchor = (0.0, 0.02),
         **dotplot_kwargs,
     )
 
