@@ -1163,7 +1163,7 @@ def gene_groups_vs_time_and_studies(
     # ===== layout/labels (SQUARE cells) =====
     cell_size: float = 0.14,     # inches per data cell in BOTH x and y (for both panels)
     middle_gap: float = 0.2,    # inches between panels (blank spacer)
-    gutter_width: float = 1.4,   # inches for right gutter (legends live here)
+    gutter_width: float = 0.8,   # inches for right gutter (legends live here)
     gutter_pad: float = 0.03,    # right-side pad in figure coords (for cbar/legends)
     figsize: tuple | None = None,
     xlabel_rotation: int = 90,

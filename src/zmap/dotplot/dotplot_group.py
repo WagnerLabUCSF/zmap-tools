@@ -1593,7 +1593,7 @@ def group_siblings_vs_markers(
     highlight_color: str = "black",
     standard_scale: Literal["var", "obs"] | None = None,
     cmap: str = "Blues",
-    enforce_global_colorscale: bool = True,
+    enforce_global_colorscale: bool = False,
 
     # layout / sizing
     width_per_gene: float = 0.04,
@@ -2286,7 +2286,7 @@ def group_descendants_vs_markers(
         group_color_dict=None if group_color_dict is None else dict(group_color_dict),
         duplicate_gene_columns=duplicate_gene_columns,
         show_size_legend=show_size_legend,
-        cbar_bbox_to_anchor=(1.04, 0.8),
+        cbar_bbox_to_anchor=(1.04, 0.84),
         size_legend_bbox_to_anchor = (0.0, 0.6),
         ring_legend_bbox_to_anchor = (0.0, 0.02),
         **dotplot_kwargs,
