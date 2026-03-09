@@ -9,14 +9,12 @@ except PackageNotFoundError:
     __version__ = "0.0.0"
 
 # Import subpackages as attributes 
-from . import process      # zmap.process
 from . import reference    # zmap.reference
 from . import dotplot      # zmap.dotplot
 from . import predict      # zmap.predict
 
 # Scanpy-style aliases: 
-pp = process
 ref = reference
 
 
-__all__ = ["__version__", "pp", "ref","dotplot", "predict"]
+__all__ = ["__version__", "ref","dotplot", "predict"]
