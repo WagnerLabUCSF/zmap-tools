@@ -406,7 +406,7 @@ def make_sibling_design_df(
 ) -> pd.DataFrame:
     """
     Construct a design_df with columns ['celltype', 'gene', support_col]
-    for use with plot_dotplot_design_fullgrid, where:
+    for use with plot_dotplot_basegrid, where:
 
       - rows are all (sibling, gene) pairs
       - if `genes` is provided, it is treated as the canonical column order
@@ -661,7 +661,7 @@ def reorder_genes_by_mean_expression(
 # Primary DotPlot Helper Function
 # ---------------------------------------------------------------------
 
-def plot_dotplot_design_fullgrid(
+def plot_dotplot_basegrid(
     adata,
     design_df: pd.DataFrame,                 # must include 'celltype' and 'gene'; optional 'support'
     *,
@@ -696,6 +696,8 @@ def plot_dotplot_design_fullgrid(
     cbar_title: str = "log(tpm)\nCounts",
     cbar_title_fontsize: float = 8.0,
     cbar_ticklabel_fontsize: float = 8.0,
+    xticklabel_fontsize: float = 10.0,
+    yticklabel_fontsize: float = 10.0,
 
     # ===================== DOT SIZE LEGEND =====================
     show_size_legend: bool = True,
@@ -1084,9 +1086,9 @@ def plot_dotplot_design_fullgrid(
     ax.set_ylim(len(row_order) - 0.5, -0.5)
 
     ax.set_xticks(range(col_count))
-    xt = ax.set_xticklabels(col_labels, rotation=xlabel_rotation, ha="center", fontsize=10)
+    xt = ax.set_xticklabels(col_labels, rotation=xlabel_rotation, ha="center", fontsize=xticklabel_fontsize)
     ax.set_yticks(range(len(row_order)))
-    yt = ax.set_yticklabels(row_order, fontsize=10)
+    yt = ax.set_yticklabels(row_order, fontsize=yticklabel_fontsize)
 
     # Append child counts / leaf marker
     if rowlabel_append_child_counts:
@@ -1110,7 +1112,7 @@ def plot_dotplot_design_fullgrid(
             else:
                 lbl = rowlabel_fmt.format(name=r, n=n)
             display_labels.append(lbl)
-        ax.set_yticklabels(display_labels, fontsize=10)
+        ax.set_yticklabels(display_labels, fontsize=yticklabel_fontsize)
 
         if left_time_strip:
             # Convert ticklabel gap from points → inches
@@ -1906,7 +1908,7 @@ def group_siblings_vs_markers(
     # ---- 9) Draw sibling block (top) ----
     grid_sib = None
     if has_sibling_block:
-        ax_sib, grid_sib = plot_dotplot_design_fullgrid(
+        ax_sib, grid_sib = plot_dotplot_basegrid(
             adata,
             design_df=design_sib,
             groupby=level_col,
@@ -1941,7 +1943,7 @@ def group_siblings_vs_markers(
                 break
 
     # ---- 10) Draw tissue block (bottom) ----
-    ax_tiss, grid_tiss = plot_dotplot_design_fullgrid(
+    ax_tiss, grid_tiss = plot_dotplot_basegrid(
         adata,
         design_df=design_tiss,
         groupby="ZMAP_Tissue",
@@ -2263,7 +2265,7 @@ def group_descendants_vs_markers(
         figsize = (width, height)
 
     # -------------------- 6) call the core dotplot function ---------------------
-    ax, grid = plot_dotplot_design_fullgrid(
+    ax, grid = plot_dotplot_basegrid(
         adata_tmp,
         design_df=marker_df.rename(columns={"celltype": "celltype", "gene": "gene"}),
         groupby=child_col,                          # rows = child level
