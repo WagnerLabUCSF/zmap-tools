@@ -2365,7 +2365,7 @@ def annotate_with_zmap(
         plot_embedding_with_ondata_labels(
             adata_ref,
             adata_query,
-            color_key=ref_label_col,
+            color_key=f"{space}_predicted",
             show=show_plots,
             save=save_outputs,
             output_dir=output_dir,
