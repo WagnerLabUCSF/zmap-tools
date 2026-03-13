@@ -3,7 +3,7 @@ requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "zmap_tools"
+name = "zmap-tools"
 version = "0.1.0"
 description = "API for working with ZMAP (Zebrafish Multi-Atlas Project)"
 readme = "README.md"
@@ -15,6 +15,16 @@ authors = [
 ]
 
 keywords = ["single-cell", "zebrafish", "rna-seq", "reference atlas", "scanpy"]
+
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
 
 dependencies = [
   "anndata>=0.10",
@@ -32,8 +42,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/WagnerLabUCSF/zmap_tools"
-Issues = "https://github.com/WagnerLabUCSF/zmap_tools/issues"
+Homepage = "https://github.com/WagnerLabUCSF/zmap-tools"
+Documentation = "https://zmap-tools.readthedocs.io"
+Issues = "https://github.com/WagnerLabUCSF/zmap-tools/issues"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
