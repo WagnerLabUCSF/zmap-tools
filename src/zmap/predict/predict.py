@@ -992,7 +992,251 @@ def summarize_knn_run(adata_query, label_key):
 
 
 # ================================================================
-#  3. Horizontal histogram (time distribution bar)
+#  3. Aggregate cell annotations to cluster-level consensus
+# ================================================================
+
+def aggregate_by_cluster(
+    adata_query: ad.AnnData,
+    cluster_col: str,
+    label_space: str,
+    *,
+    save_csv: bool = True,
+) -> pd.DataFrame:
+    """
+    Aggregate cell-level ZMAP annotations to cluster-level consensus calls.
+
+    For each cluster in ``cluster_col``, identifies the plurality label among
+    all QC-assigned (non-NA) cells, computes the fraction of assigned cells
+    carrying that label (consensus fraction), the mean per-cell kNN vote
+    probability for those cells, and the margin over the second-ranked label.
+    Also reports raw coverage counts so the user can assess per-cluster
+    annotation quality (e.g., clusters where most cells were rejected).
+
+    Parameters
+    ----------
+    adata_query : anndata.AnnData
+        Query dataset annotated by ``predict_labels_kNN`` or
+        ``annotate_with_zmap``.
+    cluster_col : str
+        Column in ``adata_query.obs`` containing user-defined cluster IDs
+        (e.g. ``"leiden"``).
+    label_space : str
+        Label namespace used during prediction (must match
+        ``adata_query.uns['zmap_labels'][label_space]``). Used to derive
+        the predicted-label and probability column names.
+    save_csv : bool, default ``True``
+        Write the cluster summary table to
+        ``./zmap/predict/{label_space}_cluster_summary.csv``.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per cluster, sorted by cluster ID, with columns:
+
+        - ``cluster``          — cluster identifier.
+        - ``n_cells_total``    — total cells in cluster.
+        - ``n_cells_assigned`` — cells with a non-NA predicted label (passed QC).
+        - ``pct_assigned``     — percentage of cells that passed QC.
+        - ``top_label``        — plurality ZMAP label among assigned cells.
+        - ``top_fraction``     — fraction of assigned cells carrying the top label.
+        - ``mean_prob``        — mean kNN vote probability of top-label cells.
+        - ``margin``           — ``top_fraction`` − ``second_fraction``;
+          ``NaN`` when fewer than 2 distinct labels are present.
+        - ``second_label``     — second-ranked label; ``NaN`` when only one
+          label is present.
+        - ``second_fraction``  — fraction of second-ranked label; ``NaN`` when
+          only one label is present.
+
+    Raises
+    ------
+    KeyError
+        If ``cluster_col`` or the predicted-label column derived from
+        ``label_space`` is not found in ``adata_query.obs``.
+
+    Notes
+    -----
+    The aggregation operates only on cells whose predicted label is non-NA
+    (i.e., cells that passed QC filters in ``predict_labels_kNN``). Rejected
+    cells are counted in ``n_cells_total`` but excluded from voting, so that
+    ``top_fraction`` and ``margin`` reflect the confidence of the *accepted*
+    predictions rather than being diluted by noise.
+
+    ``mean_prob`` reflects the mean per-cell kNN vote probability for
+    top-label cells only, and is distinct from ``top_fraction``.
+    ``top_fraction`` captures cluster-level consensus (how unanimously
+    assigned cells agree); ``mean_prob`` captures how confident the kNN
+    classifier was for those individual cells.
+    """
+    col_main = f"{label_space}_predicted"
+    col_prob = f"{label_space}_prob"
+
+    if cluster_col not in adata_query.obs.columns:
+        raise KeyError(
+            f"cluster_col '{cluster_col}' not found in adata_query.obs. "
+            f"Available columns: {list(adata_query.obs.columns)}"
+        )
+    if col_main not in adata_query.obs.columns:
+        raise KeyError(
+            f"Predicted label column '{col_main}' not found in adata_query.obs. "
+            f"Run predict_labels_kNN with label_space='{label_space}' first."
+        )
+
+    has_prob = col_prob in adata_query.obs.columns
+
+    cols_to_pull = [cluster_col, col_main] + ([col_prob] if has_prob else [])
+    obs = adata_query.obs[cols_to_pull].copy()
+    obs.columns = ["cluster", "label"] + (["prob"] if has_prob else [])
+
+    # Sort cluster IDs: numeric if possible, else lexicographic
+    all_ids = obs["cluster"].dropna().unique()
+    try:
+        cluster_ids = sorted(all_ids, key=lambda x: int(str(x)))
+    except (ValueError, TypeError):
+        cluster_ids = sorted(all_ids, key=str)
+
+    records = []
+    for cid in cluster_ids:
+        mask_cluster = obs["cluster"] == cid
+        n_total = int(mask_cluster.sum())
+
+        assigned = obs.loc[mask_cluster & obs["label"].notna()]
+        n_assigned = len(assigned)
+        pct_assigned = round(100.0 * n_assigned / n_total, 2) if n_total else 0.0
+
+        if n_assigned == 0:
+            records.append({
+                "cluster": cid,
+                "n_cells_total": n_total,
+                "n_cells_assigned": 0,
+                "pct_assigned": 0.0,
+                "top_label": pd.NA,
+                "top_fraction": pd.NA,
+                "mean_prob": pd.NA,
+                "margin": pd.NA,
+                "second_label": pd.NA,
+                "second_fraction": pd.NA,
+            })
+            continue
+
+        vc = assigned["label"].astype(str).value_counts()
+        top_label = vc.index[0]
+        top_fraction = round(int(vc.iloc[0]) / n_assigned, 4)
+
+        if len(vc) >= 2:
+            second_label   = vc.index[1]
+            second_fraction = round(int(vc.iloc[1]) / n_assigned, 4)
+            margin          = round(top_fraction - second_fraction, 4)
+        else:
+            second_label    = pd.NA
+            second_fraction = pd.NA
+            margin          = pd.NA
+
+        if has_prob:
+            top_cells = assigned[assigned["label"].astype(str) == top_label]
+            mean_prob = round(float(top_cells["prob"].mean()), 4)
+        else:
+            mean_prob = pd.NA
+
+        records.append({
+            "cluster": cid,
+            "n_cells_total": n_total,
+            "n_cells_assigned": n_assigned,
+            "pct_assigned": pct_assigned,
+            "top_label": top_label,
+            "top_fraction": top_fraction,
+            "mean_prob": mean_prob,
+            "margin": margin,
+            "second_label": second_label,
+            "second_fraction": second_fraction,
+        })
+
+    df = pd.DataFrame(records)
+
+    if save_csv:
+        save_dir = os.path.join("zmap", "predict")
+        os.makedirs(save_dir, exist_ok=True)
+        out_path = os.path.join(save_dir, f"{label_space}_cluster_summary.csv")
+        df.to_csv(out_path, index=False)
+        print(f"[ZMAP] Saved cluster summary → {out_path}")
+
+    return df
+
+
+# ================================================================
+#  4. Build per-cell annotation table
+# ================================================================
+
+def build_cell_annotations_table(
+    adata_query: ad.AnnData,
+    label_space: str,
+    *,
+    cluster_col: str | None = None,
+    save_csv: bool = True,
+) -> pd.DataFrame:
+    """
+    Build a concise per-cell annotation table from a completed ZMAP run.
+
+    Extracts the annotation-relevant columns from ``adata_query.obs`` into a
+    clean, self-contained DataFrame suitable for inspection, CSV export, or
+    downstream analysis. Only annotation columns produced by ZMAP are included
+    — the full ``obs`` is not copied.
+
+    Parameters
+    ----------
+    adata_query : anndata.AnnData
+        Annotated query dataset.
+    label_space : str
+        Label namespace used during prediction (matches
+        ``adata_query.uns['zmap_labels'][label_space]``).
+    cluster_col : str or None, default ``None``
+        If provided, include this column (e.g. ``"leiden"``) as the first
+        data column so that cells can be linked back to user-defined clusters.
+    save_csv : bool, default ``True``
+        Write the table to
+        ``./zmap/predict/{label_space}_cell_annotations.csv``.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per cell. ``cell_id`` is the obs index (cell barcode).
+        Additional columns are included when present in ``adata_query.obs``:
+
+        - ``{cluster_col}``             — user-defined cluster ID (if provided).
+        - ``{label_space}_predicted``   — assigned label (``NA`` if rejected).
+        - ``{label_space}_prob``        — kNN vote probability (0–1).
+        - ``{label_space}_reject_flag`` — ``True`` if cell failed QC.
+        - ``{label_space}_reason``      — which filter triggered rejection.
+        - ``ZMAP_time_id``              — predicted developmental time (hpf).
+    """
+    col_main   = f"{label_space}_predicted"
+    col_prob   = f"{label_space}_prob"
+    col_reject = f"{label_space}_reject_flag"
+    col_reason = f"{label_space}_reason"
+    time_col   = "ZMAP_time_id"
+
+    wanted: list[str] = []
+    if cluster_col and cluster_col in adata_query.obs.columns:
+        wanted.append(cluster_col)
+    for col in [col_main, col_prob, col_reject, col_reason, time_col]:
+        if col in adata_query.obs.columns:
+            wanted.append(col)
+
+    df = adata_query.obs[wanted].copy()
+    df.index.name = "cell_id"
+    df = df.reset_index()
+
+    if save_csv:
+        save_dir = os.path.join("zmap", "predict")
+        os.makedirs(save_dir, exist_ok=True)
+        out_path = os.path.join(save_dir, f"{label_space}_cell_annotations.csv")
+        df.to_csv(out_path, index=False)
+        print(f"[ZMAP] Saved cell annotations → {out_path}")
+
+    return df
+
+
+# ================================================================
+#  5. Horizontal histogram (time distribution bar)
 # ================================================================
 
 def plot_colorbar_histogram(
@@ -1808,7 +2052,10 @@ def annotate_with_zmap(
     ref_label_col: str = "ZMAP_CellType",
     label_space: str | None = None,
     query_truth_col: str | None = None,
-    query_label_col: str | None = None,   # e.g. "leiden" for overlap mapping
+
+    # --- cluster aggregation ---
+    cluster_col: str | None = None,       # user-defined clusters, e.g. "leiden"
+    query_label_col: str | None = None,   # deprecated alias for cluster_col
 
     # --- pipeline toggles ---
     do_preprocess: bool = True,
@@ -1821,6 +2068,8 @@ def annotate_with_zmap(
 
     # --- output controls ---
     print_summary: bool = True,
+    show_plots: bool = True,              # set False in headless / script contexts
+    save_outputs: bool = True,            # save CSVs and PNGs to ./zmap/predict/
 ) -> ad.AnnData:
     """
     End-to-end ZMAP annotation pipeline: preprocess → embed → transfer labels → plot.
@@ -1862,10 +2111,12 @@ def annotate_with_zmap(
     query_truth_col : str or None, default ``None``
         Ground-truth label column in ``adata_query.obs``, used for evaluation
         metrics when ``predict_kwargs`` includes ``evaluate=True``.
+    cluster_col : str or None, default ``None``
+        Column in ``adata_query.obs`` containing user-defined cluster IDs
+        (e.g. ``"leiden"``). When provided, enables cluster-level consensus
+        aggregation and the label-overlap heatmap. Recommended for most workflows.
     query_label_col : str or None, default ``None``
-        Existing label column in ``adata_query.obs`` (e.g. ``"leiden"``) to
-        cross-tabulate against the transferred ZMAP labels via ``map_query_labels``.
-        Skipped when ``None``.
+        Deprecated alias for ``cluster_col``. Use ``cluster_col`` instead.
     do_preprocess : bool, default ``True``
         Run TPM normalization + log1p on the query before mapping.
         Set to ``False`` if ``adata_query.X`` is already log-normalized.
@@ -1883,6 +2134,12 @@ def annotate_with_zmap(
         (e.g. ``{"n_neighbors": 50, "p_thresh": 0.7}``).
     print_summary : bool, default ``True``
         Print a brief progress log and final summary to stdout.
+    show_plots : bool, default ``True``
+        Call ``plt.show()`` after each figure. Set to ``False`` in headless
+        or script contexts (figures are still saved when ``save_outputs=True``).
+    save_outputs : bool, default ``True``
+        Save cell annotations CSV, cluster summary CSV, and all figures
+        to ``./zmap/predict/``.
 
     Returns
     -------
@@ -1890,24 +2147,34 @@ def annotate_with_zmap(
         The annotated query dataset (same object, modified in-place). Key
         additions to ``adata_query``:
 
-        - ``.obs[f"{label_space}_predicted"]``  — transferred cell labels.
-        - ``.obs[f"{label_space}_prob"]``        — label confidence (0–1).
-        - ``.obs["ZMAP_time_id"]``               — predicted developmental time (hpf).
-        - ``.obsm["X_umap"]``                   — UMAP coordinates (if ingested).
-        - ``.uns['zmap_labels'][label_space]``   — full run metadata and summary.
+        - ``.obs[f"{label_space}_predicted"]``                       — transferred cell labels.
+        - ``.obs[f"{label_space}_prob"]``                            — label confidence (0–1).
+        - ``.obs["ZMAP_time_id"]``                                   — predicted time (hpf).
+        - ``.obsm["X_umap"]``                                        — UMAP coordinates (if ingested).
+        - ``.uns['zmap_labels'][label_space]['Run Summary Simple']`` — key/value run summary.
+        - ``.uns['zmap_labels'][label_space]['Cell Annotations']``   — per-cell table.
+        - ``.uns['zmap_labels'][label_space]['Cluster Summary']``    — cluster consensus table
+          (only when ``cluster_col`` is provided).
+        - ``.uns['zmap_labels'][label_space]['Label Mapping']``      — cluster×label overlap
+          (only when ``cluster_col`` is provided).
 
     Examples
     --------
+    Minimal usage:
+
     >>> adata = zmap.predict.annotate_with_zmap(
     ...     adata_query,
     ...     query_raw_counts_source="counts",
+    ...     cluster_col="leiden",
     ... )
+
+    With custom reference label and predict options:
 
     >>> adata = zmap.predict.annotate_with_zmap(
     ...     adata_query,
     ...     query_raw_counts_source="X",
     ...     ref_label_col="ZMAP_Tissue",
-    ...     query_label_col="leiden",
+    ...     cluster_col="leiden",
     ...     predict_kwargs={"n_neighbors": 50},
     ... )
     """
@@ -1918,9 +2185,33 @@ def annotate_with_zmap(
         message=".*overridden to 1 by setting random_state.*"
     )
 
-    # -----------------------------
-    # 0. Load reference if needed
-    # -----------------------------
+    # ------------------------------------------------------------------
+    # 0. Resolve cluster_col (handle deprecated query_label_col alias)
+    # ------------------------------------------------------------------
+    if query_label_col is not None and cluster_col is None:
+        warnings.warn(
+            "query_label_col is deprecated and will be removed in a future version. "
+            "Use cluster_col instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        cluster_col = query_label_col
+
+    if cluster_col is None:
+        print(
+            "[ZMAP] Note: no cluster_col supplied. Cluster-level consensus aggregation "
+            "will be skipped. Pass cluster_col='leiden' (or similar) for a complete summary."
+        )
+    elif cluster_col not in adata_query.obs.columns:
+        print(
+            f"[ZMAP] Warning: cluster_col '{cluster_col}' not found in adata_query.obs. "
+            "Cluster aggregation will be skipped."
+        )
+        cluster_col = None
+
+    # ------------------------------------------------------------------
+    # 1. Load reference if needed
+    # ------------------------------------------------------------------
     if adata_ref is None:
         print(f"[ZMAP] Loading reference ({ref_kind})...")
         from zmap.reference import load_zmap_h5ad
@@ -1930,9 +2221,9 @@ def annotate_with_zmap(
     # Effective label namespace
     space = label_space or ref_label_col
 
-    # -----------------------------
-    # 1. Preprocess query (TPM+log1p)
-    # -----------------------------
+    # ------------------------------------------------------------------
+    # 2. Preprocess query (TPM + log1p)
+    # ------------------------------------------------------------------
     if do_preprocess:
         print("[ZMAP] Preprocessing query — TPM normalization + log1p ...")
         pp_kwargs = dict(preprocess_kwargs or {})
@@ -1943,9 +2234,9 @@ def annotate_with_zmap(
         )
         print("[ZMAP] Preprocessing complete.")
 
-    # -----------------------------
-    # 2. Symphony mapping / ingest
-    # -----------------------------
+    # ------------------------------------------------------------------
+    # 3. Symphony mapping / UMAP ingest
+    # ------------------------------------------------------------------
     if do_map_embedding:
         print("[ZMAP] Mapping query to ZMAP Symphony embedding...")
 
@@ -1965,9 +2256,9 @@ def annotate_with_zmap(
             sp.tl.ingest(adata_query=adata_query, adata_ref=adata_ref)
             print("[ZMAP] Ingestion complete.")
 
-    # -----------------------------
-    # 3. kNN label transfer
-    # -----------------------------
+    # ------------------------------------------------------------------
+    # 4. kNN label transfer
+    # ------------------------------------------------------------------
     print("[ZMAP] Running kNN-based label transfer...")
     pk = dict(predict_kwargs or {})
     pk.setdefault("ref_basis", "X_pca_harmony")
@@ -1984,70 +2275,121 @@ def annotate_with_zmap(
     )
     print("[ZMAP] Label transfer finished.")
 
-    # -----------------------------
-    # 4. Build + store simplified summary
-    # -----------------------------
+    # ------------------------------------------------------------------
+    # 5. Run summary (key/value metadata table)
+    # ------------------------------------------------------------------
     df_summary = summarize_knn_run(adata_query, space)
 
     adata_query.uns.setdefault("zmap_labels", {}).setdefault(space, {})
     adata_query.uns["zmap_labels"][space]["Run Summary Simple"] = df_summary
 
     if print_summary:
+        print("\n[ZMAP] ── Run Summary ──────────────────────────────────────")
         try:
             from IPython.display import display
-            display(adata_query.uns["zmap_labels"][space]["Run Summary Simple"])
+            display(df_summary)
         except Exception:
-            # fall back to plain print if display isn't available
-            print(adata_query.uns["zmap_labels"][space]["Run Summary Simple"])
+            print(df_summary.to_string(index=False))
 
-    # -----------------------------
-    # 5. UMAP overlay figure
-    # -----------------------------
+    # ------------------------------------------------------------------
+    # 6. Per-cell annotation table
+    # ------------------------------------------------------------------
+    print("[ZMAP] Building per-cell annotation table...")
+    df_cells = build_cell_annotations_table(
+        adata_query,
+        space,
+        cluster_col=cluster_col,
+        save_csv=save_outputs,
+    )
+    adata_query.uns["zmap_labels"][space]["Cell Annotations"] = df_cells
+
+    if print_summary:
+        n_cells = len(df_cells)
+        print(f"\n[ZMAP] ── Cell Annotations ({n_cells:,} cells) ──────────────────")
+        try:
+            from IPython.display import display
+            display(df_cells.head(10))
+            if n_cells > 10:
+                print(f"       … {n_cells - 10:,} additional rows (full table in uns and CSV)")
+        except Exception:
+            print(df_cells.head(10).to_string(index=False))
+            if n_cells > 10:
+                print(f"       … {n_cells - 10:,} additional rows")
+
+    # ------------------------------------------------------------------
+    # 7. Cluster-level consensus aggregation
+    # ------------------------------------------------------------------
+    if cluster_col is not None:
+        print(f"[ZMAP] Aggregating cell annotations by cluster ('{cluster_col}')...")
+        try:
+            df_clusters = aggregate_by_cluster(
+                adata_query,
+                cluster_col=cluster_col,
+                label_space=space,
+                save_csv=save_outputs,
+            )
+            adata_query.uns["zmap_labels"][space]["Cluster Summary"] = df_clusters
+
+            if print_summary:
+                n_clusters = len(df_clusters)
+                print(f"\n[ZMAP] ── Cluster Summary ({n_clusters} clusters) ─────────────────")
+                try:
+                    from IPython.display import display
+                    display(df_clusters)
+                except Exception:
+                    print(df_clusters.to_string(index=False))
+
+            print("[ZMAP] Cluster aggregation complete.")
+        except Exception as e:
+            print(f"[ZMAP] Warning: cluster aggregation failed: {e}")
+
+    # ------------------------------------------------------------------
+    # 8. UMAP overlay figure
+    # ------------------------------------------------------------------
     adata_query.uns['ZMAP_CellType_colors'] = adata_ref.uns['ZMAP_CellType_colors'].copy()
-    adata_query.uns['ZMAP_Tissue_colors'] = adata_ref.uns['ZMAP_Tissue_colors'].copy()
+    adata_query.uns['ZMAP_Tissue_colors']   = adata_ref.uns['ZMAP_Tissue_colors'].copy()
     adata_query.uns['ZMAP_GermLayer_colors'] = adata_ref.uns['ZMAP_GermLayer_colors'].copy()
     try:
         print("[ZMAP] Plotting UMAP overlay with predicted labels...")
         plot_embedding_with_ondata_labels(
             adata_ref,
             adata_query,
-            color_key=ref_label_col,  # use the main label column in obs
-            show=False,               # save to disk, don't pop up interactively
-            save=True,                # default in that function, but explicit here
+            color_key=ref_label_col,
+            show=show_plots,
+            save=save_outputs,
         )
         print("[ZMAP] UMAP overlay figure saved.")
     except Exception as e:
         print(f"[ZMAP] Warning: failed to generate UMAP overlay figure: {e}")
 
-    # -----------------------------
-    # 6. Label overlap mapping (query_label_col vs. ref_label_col)
-    # -----------------------------
-    if query_label_col is not None:
-        if query_label_col not in adata_query.obs.columns:
+    # ------------------------------------------------------------------
+    # 9. Label overlap heatmap (cluster × ZMAP label)
+    # ------------------------------------------------------------------
+    if cluster_col is not None:
+        try:
             print(
-                f"[ZMAP] Warning: query_label_col '{query_label_col}' not found in "
-                f"adata_query.obs; skipping label mapping."
+                f"[ZMAP] Computing label overlap: "
+                f"'{cluster_col}' (rows) vs '{ref_label_col}' (columns)..."
             )
-        else:
-            try:
-                print(
-                    f"[ZMAP] Computing label overlap: "
-                    f"'{query_label_col}' (rows) vs '{ref_label_col}' (columns)..."
-                )
-                mapping_df = map_query_labels(
-                    adata_query,
-                    obs_A=ref_label_col,
-                    obs_B=query_label_col,
-                    normalize="row",
-                    show_plot=True,    # heatmap, also saved by map_labels
-                    return_df=True,
-                )
-                # store mapping in uns
-                adata_query.uns["zmap_labels"][space]["Label Mapping"] = mapping_df
-                print("[ZMAP] Label mapping complete and stored in adata_query.uns.")
-            except Exception as e:
-                print(f"[ZMAP] Warning: failed to compute label mapping: {e}")
+            mapping_df = map_query_labels(
+                adata_query,
+                obs_A=ref_label_col,
+                obs_B=cluster_col,
+                normalize="row",
+                show_plot=show_plots,
+                return_df=True,
+                save_plots=save_outputs,
+                save_mapping=save_outputs,
+            )
+            adata_query.uns["zmap_labels"][space]["Label Mapping"] = mapping_df
+            print("[ZMAP] Label overlap mapping complete.")
+        except Exception as e:
+            print(f"[ZMAP] Warning: failed to compute label mapping: {e}")
 
-    print(f"[ZMAP] Annotation complete. Results stored under namespace '{space}'.")
+    print(f"\n[ZMAP] ✓ Annotation complete. Results stored under namespace '{space}'.")
+    print(f"[ZMAP]   Access summary:  adata.uns['zmap_labels']['{space}']")
+    print(f"[ZMAP]   Cell table:      adata.obs['{space}_predicted'], '{space}_prob', ...")
+    if cluster_col is not None:
+        print(f"[ZMAP]   Cluster table:   adata.uns['zmap_labels']['{space}']['Cluster Summary']")
     return adata_query
 
