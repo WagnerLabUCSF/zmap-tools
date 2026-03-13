@@ -18,17 +18,23 @@ release = "0.1.0"
 
 # -- General configuration ----------------------------------------------------
 
-# Mock imports that aren't available at doc-build time
+# Mock imports that aren't available at doc-build time.
+# Since we don't pip-install the package on RTD (to avoid heavy
+# scientific deps), ALL third-party imports must be mocked.
 autodoc_mock_imports = [
     "anndata",
+    "adjustText",
+    "matplotlib",
+    "mpl_toolkits",
+    "numpy",
+    "pandas",
+    "requests",
     "scanpy",
     "scipy",
-    "sklearn",
-    "tqdm",
-    "adjustText",
-    "symphonypy",
     "seaborn",
-    "requests",
+    "sklearn",
+    "symphonypy",
+    "tqdm",
 ]
 
 extensions = [
@@ -80,7 +86,6 @@ html_static_path = ["_static"]
 
 html_theme_options = {
     "logo_only": False,
-    "display_version": True,
     "prev_next_buttons_location": "bottom",
     "style_external_links": True,
     "navigation_depth": 3,

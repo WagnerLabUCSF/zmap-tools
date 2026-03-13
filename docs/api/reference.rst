@@ -26,9 +26,10 @@ Consensus Markers
 Data Registry
 -------------
 
-.. autodata:: zmap.reference.load_h5ad.H5AD_SOURCES
-   :annotation: = {...}
+The following preset keys are available for the ``kind`` parameter:
 
-   Dictionary mapping preset names (``"raw"``, ``"processed"``,
-   ``"processed_slim"``, ``"processed_slim_tpm"``, ``"symphony"``) to
-   their CDN URLs and filenames.
+- ``"raw"`` — raw counts, unprocessed.
+- ``"processed"`` — fully processed, includes intermediate layers.
+- ``"processed_slim"`` — fully processed, raw counts only.
+- ``"processed_slim_tpm"`` — fully processed, TPM counts only (default).
+- ``"symphony"`` — Symphony reference for query embedding and label transfer.

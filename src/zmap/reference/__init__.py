@@ -8,7 +8,9 @@ and to query curated consensus marker gene tables at multiple annotation levels.
 """
 
 from .markers import load_consensus_markers
-from .load_h5ad import load_zmap_h5ad
+from .load_h5ad import load_zmap_h5ad, download_zmap_h5ad, preprocess_tpmlog
 
 __all__ = ["load_consensus_markers", 
-		   "load_zmap_h5ad"]
+		   "load_zmap_h5ad",
+		   "download_zmap_h5ad",
+		   "preprocess_tpmlog"]
