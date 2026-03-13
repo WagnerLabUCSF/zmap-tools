@@ -243,6 +243,9 @@ def predict_labels_kNN(
     d_thresh: float | None = 0.1,
     min_cells_per_label: int = 15,
     apply_filters: bool = True,
+
+    # Output location
+    output_dir: str = "zmap_predict",
 ):
     """
     Transfer cell-type labels from a reference to a query dataset using kNN voting.
@@ -674,9 +677,7 @@ def predict_labels_kNN(
         if plot_mapping_qc:
             import os
 
-            # directory: working_directory/zmap/qc
-            qc_dir = os.path.join(os.getcwd(), "zmap", "qc")
-            os.makedirs(qc_dir, exist_ok=True)
+            os.makedirs(output_dir, exist_ok=True)
 
             # ----- Probability histogram -----
             fig1 = plt.figure()
@@ -696,7 +697,7 @@ def predict_labels_kNN(
 
             # save figure
             if save_mapping_qc:
-                prob_path = os.path.join(qc_dir, f"{labels_base}_qc_probability.png")
+                prob_path = os.path.join(output_dir, f"{labels_base}_qc_probability.png")
                 fig1.savefig(prob_path, dpi=300)
                 print(f"[ZMAP] Saved QC plot: {prob_path}")
 
@@ -720,7 +721,7 @@ def predict_labels_kNN(
 
             # save figure
             if save_mapping_qc:
-                dist_path = os.path.join(qc_dir, f"{labels_base}_qc_distance.png")
+                dist_path = os.path.join(output_dir, f"{labels_base}_qc_distance.png")
                 fig2.savefig(dist_path, dpi=300)
                 print(f"[ZMAP] Saved QC plot: {dist_path}")
 
@@ -1001,6 +1002,7 @@ def aggregate_by_cluster(
     label_space: str,
     *,
     save_csv: bool = True,
+    output_dir: str = "zmap_predict",
 ) -> pd.DataFrame:
     """
     Aggregate cell-level ZMAP annotations to cluster-level consensus calls.
@@ -1154,9 +1156,8 @@ def aggregate_by_cluster(
     df = pd.DataFrame(records)
 
     if save_csv:
-        save_dir = os.path.join("zmap", "predict")
-        os.makedirs(save_dir, exist_ok=True)
-        out_path = os.path.join(save_dir, f"{label_space}_cluster_summary.csv")
+        os.makedirs(output_dir, exist_ok=True)
+        out_path = os.path.join(output_dir, f"{label_space}_cluster_summary.csv")
         df.to_csv(out_path, index=False)
         print(f"[ZMAP] Saved cluster summary → {out_path}")
 
@@ -1173,6 +1174,7 @@ def build_cell_annotations_table(
     *,
     cluster_col: str | None = None,
     save_csv: bool = True,
+    output_dir: str = "zmap_predict",
 ) -> pd.DataFrame:
     """
     Build a concise per-cell annotation table from a completed ZMAP run.
@@ -1228,9 +1230,8 @@ def build_cell_annotations_table(
     df = df.reset_index()
 
     if save_csv:
-        save_dir = os.path.join("zmap", "predict")
-        os.makedirs(save_dir, exist_ok=True)
-        out_path = os.path.join(save_dir, f"{label_space}_cell_annotations.csv")
+        os.makedirs(output_dir, exist_ok=True)
+        out_path = os.path.join(output_dir, f"{label_space}_cell_annotations.csv")
         df.to_csv(out_path, index=False)
         print(f"[ZMAP] Saved cell annotations → {out_path}")
 
@@ -1530,6 +1531,7 @@ def plot_embedding_with_ondata_labels(
     show: bool = False,
     save: bool = True,
     return_ax: bool = False,
+    output_dir: str = "zmap_predict",
 ):
     """
     Plot a query dataset overlaid on the reference embedding, with on-data labels
@@ -1792,12 +1794,11 @@ def plot_embedding_with_ondata_labels(
 
         # ---- SAVE FIGURE ----
         if save:
-            outdir = os.path.join(os.getcwd(), "zmap", "predict")
-            os.makedirs(outdir, exist_ok=True)
+            os.makedirs(output_dir, exist_ok=True)
 
             safe_name = color_key.replace("/", "_").replace(" ", "_")
-            png_path = os.path.join(outdir, f"{safe_name}.png")
-            pdf_path = os.path.join(outdir, f"{safe_name}.pdf")
+            png_path = os.path.join(output_dir, f"{safe_name}.png")
+            pdf_path = os.path.join(output_dir, f"{safe_name}.pdf")
 
             fig.savefig(png_path, dpi=dpi*3, bbox_inches="tight")
             fig.savefig(pdf_path, bbox_inches="tight")
@@ -1838,6 +1839,7 @@ def map_query_labels(
     save_plots=True,              # save PNG + PDF
     save_mapping=True,            # save mapping_df to CSV
     file_prefix: str | None = None,  # optional prefix for output filenames; defaults to obs_A
+    output_dir: str = "zmap_predict",
 ):
     """
     Compute and visualize the overlap between two label columns in a query AnnData.
@@ -2019,19 +2021,18 @@ def map_query_labels(
     # --------------------------------------------------------------------------
     # 7. Saving (always applies when save_mapping=True)
     # --------------------------------------------------------------------------
-    save_dir = os.path.join("zmap", "predict")
-    os.makedirs(save_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
 
     prefix = file_prefix or obs_A
 
     if save_plots and fig is not None:
         base = f"{prefix}_{obs_B}_overlap"
-        fig.savefig(os.path.join(save_dir, f"{base}.png"), dpi=300, bbox_inches="tight")
-        fig.savefig(os.path.join(save_dir, f"{base}.pdf"), bbox_inches="tight")
-        print(f"[ZMAP] Saved overlap figure → {save_dir}/{base}.png")
+        fig.savefig(os.path.join(output_dir, f"{base}.png"), dpi=300, bbox_inches="tight")
+        fig.savefig(os.path.join(output_dir, f"{base}.pdf"), bbox_inches="tight")
+        print(f"[ZMAP] Saved overlap figure → {output_dir}/{base}.png")
 
     if save_mapping and mapping_df is not None:
-        out_csv = os.path.join(save_dir, f"{prefix}_{obs_B}_top_label.csv")
+        out_csv = os.path.join(output_dir, f"{prefix}_{obs_B}_top_label.csv")
         mapping_df.to_csv(out_csv)
         print(f"[ZMAP] Saved top-label mapping → {out_csv}")
 
@@ -2074,7 +2075,8 @@ def annotate_with_zmap(
     # --- output controls ---
     print_summary: bool = True,
     show_plots: bool = True,              # set False in headless / script contexts
-    save_outputs: bool = True,            # save CSVs and PNGs to ./zmap/predict/
+    save_outputs: bool = True,            # save CSVs and PNGs to output_dir
+    output_dir: str = "zmap_predict",     # directory for all saved files
 ) -> ad.AnnData:
     """
     End-to-end ZMAP annotation pipeline: preprocess → embed → transfer labels → plot.
@@ -2270,6 +2272,7 @@ def annotate_with_zmap(
     pk.setdefault("query_basis", "X_pca_harmony")
     pk.setdefault("metric", "cosine")
     pk.setdefault("label_suffix", "predicted")   # ensures obs columns are always {space}_predicted
+    pk.setdefault("output_dir", output_dir)
 
     predict_labels_kNN(
         adata_query,
@@ -2306,6 +2309,7 @@ def annotate_with_zmap(
         space,
         cluster_col=cluster_col,
         save_csv=save_outputs,
+        output_dir=output_dir,
     )
     adata_query.uns["zmap_labels"][space]["Cell Annotations"] = df_cells
 
@@ -2333,6 +2337,7 @@ def annotate_with_zmap(
                 cluster_col=cluster_col,
                 label_space=space,
                 save_csv=save_outputs,
+                output_dir=output_dir,
             )
             adata_query.uns["zmap_labels"][space]["Cluster Summary"] = df_clusters
 
@@ -2363,6 +2368,7 @@ def annotate_with_zmap(
             color_key=ref_label_col,
             show=show_plots,
             save=save_outputs,
+            output_dir=output_dir,
         )
         print("[ZMAP] UMAP overlay figure saved.")
     except Exception as e:
@@ -2385,8 +2391,9 @@ def annotate_with_zmap(
                 show_plot=show_plots,
                 return_df=True,
                 save_plots=save_outputs,
-                save_mapping=False,       # cluster summary CSV is the authoritative output
+                save_mapping=False,
                 file_prefix=space,
+                output_dir=output_dir,
             )
             adata_query.uns["zmap_labels"][space]["Label Mapping"] = mapping_df
             print("[ZMAP] Label overlap mapping complete.")
