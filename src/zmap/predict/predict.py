@@ -696,7 +696,7 @@ def predict_labels_kNN(
 
             # save figure
             if save_mapping_qc:
-                prob_path = os.path.join(qc_dir, "probability_qc.png")
+                prob_path = os.path.join(qc_dir, f"{labels_base}_qc_probability.png")
                 fig1.savefig(prob_path, dpi=300)
                 print(f"[ZMAP] Saved QC plot: {prob_path}")
 
@@ -720,7 +720,7 @@ def predict_labels_kNN(
 
             # save figure
             if save_mapping_qc:
-                dist_path = os.path.join(qc_dir, "distance_qc.png")
+                dist_path = os.path.join(qc_dir, f"{labels_base}_qc_distance.png")
                 fig2.savefig(dist_path, dpi=300)
                 print(f"[ZMAP] Saved QC plot: {dist_path}")
 
@@ -1067,8 +1067,9 @@ def aggregate_by_cluster(
     assigned cells agree); ``mean_prob`` captures how confident the kNN
     classifier was for those individual cells.
     """
-    col_main = f"{label_space}_predicted"
-    col_prob = f"{label_space}_prob"
+    labels_base = f"{label_space}_predicted"
+    col_main    = labels_base
+    col_prob    = f"{labels_base}_prob"
 
     if cluster_col not in adata_query.obs.columns:
         raise KeyError(
@@ -1208,10 +1209,11 @@ def build_cell_annotations_table(
         - ``{label_space}_reason``      — which filter triggered rejection.
         - ``ZMAP_time_id``              — predicted developmental time (hpf).
     """
-    col_main   = f"{label_space}_predicted"
-    col_prob   = f"{label_space}_prob"
-    col_reject = f"{label_space}_reject_flag"
-    col_reason = f"{label_space}_reason"
+    labels_base = f"{label_space}_predicted"
+    col_main   = labels_base
+    col_prob   = f"{labels_base}_prob"
+    col_reject = f"{labels_base}_reject_flag"
+    col_reason = f"{labels_base}_reason"
     time_col   = "ZMAP_time_id"
 
     wanted: list[str] = []
@@ -1835,6 +1837,7 @@ def map_query_labels(
     figsize=8,
     save_plots=True,              # save PNG + PDF
     save_mapping=True,            # save mapping_df to CSV
+    file_prefix: str | None = None,  # optional prefix for output filenames; defaults to obs_A
 ):
     """
     Compute and visualize the overlap between two label columns in a query AnnData.
@@ -2019,16 +2022,18 @@ def map_query_labels(
     save_dir = os.path.join("zmap", "predict")
     os.makedirs(save_dir, exist_ok=True)
 
+    prefix = file_prefix or obs_A
+
     if save_plots and fig is not None:
-        base = f"ZMAP_overlap_{obs_B}_vs_{obs_A}"
+        base = f"{prefix}_{obs_B}_overlap"
         fig.savefig(os.path.join(save_dir, f"{base}.png"), dpi=300, bbox_inches="tight")
         fig.savefig(os.path.join(save_dir, f"{base}.pdf"), bbox_inches="tight")
-        print(f"[ZMAP] Saved overlap figure → {save_dir}")
+        print(f"[ZMAP] Saved overlap figure → {save_dir}/{base}.png")
 
     if save_mapping and mapping_df is not None:
-        out_csv = os.path.join(save_dir, f"ZMAP_label_mapping_{obs_B}_vs_{obs_A}.csv")
+        out_csv = os.path.join(save_dir, f"{prefix}_{obs_B}_top_label.csv")
         mapping_df.to_csv(out_csv)
-        print(f"[ZMAP] Saved mapping table → {out_csv}")
+        print(f"[ZMAP] Saved top-label mapping → {out_csv}")
 
     # --------------------------------------------------------------------------
     # 8. Return mapping_df or None
@@ -2264,6 +2269,7 @@ def annotate_with_zmap(
     pk.setdefault("ref_basis", "X_pca_harmony")
     pk.setdefault("query_basis", "X_pca_harmony")
     pk.setdefault("metric", "cosine")
+    pk.setdefault("label_suffix", "predicted")   # ensures obs columns are always {space}_predicted
 
     predict_labels_kNN(
         adata_query,
@@ -2379,7 +2385,8 @@ def annotate_with_zmap(
                 show_plot=show_plots,
                 return_df=True,
                 save_plots=save_outputs,
-                save_mapping=save_outputs,
+                save_mapping=False,       # cluster summary CSV is the authoritative output
+                file_prefix=space,
             )
             adata_query.uns["zmap_labels"][space]["Label Mapping"] = mapping_df
             print("[ZMAP] Label overlap mapping complete.")
