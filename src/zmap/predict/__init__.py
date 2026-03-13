@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+"""
+Label transfer, annotation, and diagnostic visualization.
+
+Provides the end-to-end ``annotate_with_zmap`` pipeline as well as
+lower-level functions for preprocessing, kNN-based label transfer,
+cluster aggregation, and UMAP overlay plotting.
+"""
+
 from .predict import (
     preprocess_adata_query,
     predict_labels_kNN,

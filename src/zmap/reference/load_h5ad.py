@@ -140,23 +140,57 @@ def download_zmap_h5ad(
     show_progress: bool = True,
 ) -> pathlib.Path:
     """
-    Download an H5AD file.
+    Download a ZMAP H5AD file from the CDN, with local caching.
+
+    Downloads the file to a persistent cache directory (Google Drive when
+    available, otherwise a local directory). Subsequent calls with the same
+    ``kind`` skip the download if the file already exists on disk.
+
+    Most users should prefer :func:`load_zmap_h5ad`, which calls this function
+    internally and also handles loading and preprocessing.
 
     Parameters
     ----------
-    kind
-        One of H5AD_SOURCES keys, used to look up default URL and filename.
-        Ignored if `url` is provided.
-    url
-        Optional explicit URL. If given, overrides the registry URL.
-    dest_dir
-        Directory to store the file. Default: /content/drive/MyDrive/zmap/h5ad.
-    filename
-        Optional filename override.
-    write_to_disk
-        If False, downloads to a temp file (not kept after load).
-    force_download
-        If True, re-download even if dest file exists.
+    kind : str or None, default ``"processed_slim_tpm"``
+        Preset dataset key. One of the keys in :data:`H5AD_SOURCES`
+        (``"raw"``, ``"processed"``, ``"processed_slim"``,
+        ``"processed_slim_tpm"``, ``"symphony"``). Ignored when ``url``
+        is provided.
+    url : str or None, default ``None``
+        Explicit download URL. Overrides the registry URL looked up via
+        ``kind``.
+    dest_dir : path-like or None, default ``None``
+        Directory to store the downloaded file. Defaults to
+        ``/content/drive/MyDrive/zmap/h5ad`` when Google Drive is mounted,
+        or ``<cwd>/zmap/h5ad`` otherwise.
+    filename : str or None, default ``None``
+        Override the filename used when saving to disk. Inferred from the
+        registry or URL when not provided.
+    write_to_disk : bool, default ``True``
+        If ``False``, downloads to a temporary file that is not kept after
+        loading.
+    force_download : bool, default ``False``
+        Re-download the file even if it already exists on disk.
+    chunk_size : int, default ``1 << 20`` (1 MB)
+        Download chunk size in bytes.
+    show_progress : bool, default ``True``
+        Display a ``tqdm`` progress bar during download.
+
+    Returns
+    -------
+    pathlib.Path
+        Path to the downloaded (or cached) H5AD file on disk.
+
+    Raises
+    ------
+    ValueError
+        If no URL can be resolved from ``kind`` or ``url``.
+
+    Examples
+    --------
+    >>> path = zmap.ref.download_zmap_h5ad()
+    >>> path = zmap.ref.download_zmap_h5ad(kind="symphony")
+    >>> path = zmap.ref.download_zmap_h5ad(url="https://.../my.h5ad")
     """
     meta = H5AD_SOURCES.get(kind or "", {}) if url is None else {}
     final_url = url or meta.get("url")
@@ -195,8 +229,26 @@ def download_zmap_h5ad(
 
 def preprocess_tpmlog(adata: ad.AnnData):
     """
-    Add a 'tpm_log' layer if missing but 'raw_nolog' exists.
-    Performs standard TPM normalization and log1p transform.
+    Add a ``tpm_log`` layer by normalizing raw counts to TPM + log1p.
+
+    Checks whether ``adata.layers["raw_nolog"]`` exists and
+    ``adata.layers["tpm_log"]`` does not. When both conditions are met,
+    performs library-size normalization to counts per million followed by
+    ``log1p``, and stores the result as ``adata.layers["tpm_log"]``.
+
+    This is a convenience function called automatically by
+    :func:`load_zmap_h5ad` when ``attempt_preprocess_tpmlog=True``.
+
+    Parameters
+    ----------
+    adata : anndata.AnnData
+        The dataset to preprocess. Modified in-place.
+
+    Notes
+    -----
+    After this call, ``adata.X`` is cleared (set to ``None``) so that
+    downstream code explicitly selects a layer rather than relying on
+    a stale ``.X`` matrix.
     """
     if "raw_nolog" in adata.layers and "tpm_log" not in adata.layers:
         print("[ZMAP] Computing 'tpm_log' from 'raw_nolog' (normalize + log1p)")

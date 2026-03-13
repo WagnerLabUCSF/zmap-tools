@@ -508,16 +508,66 @@ def gene_groups_vs_time(
     return_long: bool = False,
 ):
     """
-    Stable-layout dotplot of a single color feature across (cluster × timepoint).
+    Dotplot of a single gene across cell types and developmental timepoints.
 
-    `color` is usually a gene name (taken from raw/layer/X), but if no gene
-    match is found it will fall back to a numeric column in `adata.obs`.
+    Renders a ``(cell type × timepoint)`` grid where dot color encodes mean
+    expression and dot size encodes the fraction of cells expressing the gene
+    above ``detect_threshold``. Bins with insufficient cells are shown as
+    grey dots at minimum size.
 
-    Dot semantics
-    -------------
-    * Color: mean value per (cluster, time) bin.
-    * Size:  fraction of cells with value > `detect_threshold`.
-    * Low-support / missing: grey at minimum size.
+    ``color`` is resolved first as a gene name in ``adata.var_names``
+    (or ``adata.raw`` / ``adata.layers[layer]``); if no match is found it
+    falls back to a numeric column in ``adata.obs``.
+
+    Parameters
+    ----------
+    adata : anndata.AnnData
+        Reference dataset containing expression data and ``obs`` columns
+        for ``groupby`` and ``time_col``.
+    color : str
+        Gene name or numeric ``obs`` column to visualize.
+    groupby : str, default ``"ZMAP_CellType"``
+        ``obs`` column whose categories form the rows.
+    time_col : str, default ``"time_block_id"``
+        ``obs`` column containing developmental time group labels (columns).
+    layer : str or None, default ``"tpm_log"``
+        Layer to use for expression values.
+    use_raw : bool or None, default ``None``
+        If ``True``, use ``adata.raw``.
+    detect_threshold : float, default ``0.0``
+        Minimum value for a cell to count as "expressing".
+    show : bool, default ``True``
+        Call ``plt.show()`` after rendering.
+    cmap : str, default ``"viridis"``
+        Colormap for mean expression.
+    vmin, vmax : float or None
+        Color scale limits.
+    standard_scale : str or None, default ``None``
+        Scale values per timepoint (``"time"``) or per cluster (``"cluster"``).
+    s_min, s_max : float
+        Dot size range in points squared.
+    cluster_order : list of str or None
+        Explicit row ordering. Defaults to the canonical ZMAP CellType order.
+    time_order : list of str or None
+        Explicit column ordering. Inferred from data when ``None``.
+    omit_groups : list of str or None
+        Cell-type labels to exclude.
+    row_color_groups : dict or None
+        ``{color: [group, ...]}`` mapping to color row labels by lineage.
+    row_dividers : list of int or None
+        Row indices at which to draw horizontal divider lines.
+    return_long : bool, default ``False``
+        Also return the underlying long-form DataFrame.
+
+    Returns
+    -------
+    tuple of (matplotlib.axes.Axes, pd.DataFrame or None)
+        ``(ax, long_df)`` where ``long_df`` is the aggregated data table
+        when ``return_long=True``, otherwise ``None``.
+
+    Examples
+    --------
+    >>> ax, _ = zmap.dotplot.dotplot_gene.gene_groups_vs_time(adata_ref, "sox2")
     """
     color = str(color)
 
@@ -852,16 +902,65 @@ def gene_groups_vs_studies(
     return_long: bool = False,
 ):
     """
-    Stable-layout dotplot of a single color feature across (cluster × study).
+    Dotplot of a single gene across cell types and studies.
 
-    `color` is usually a gene name (taken from raw/layer/X), but if no gene
-    match is found it will fall back to a numeric column in `adata.obs`.
+    Renders a ``(cell type × study)`` grid where dot color encodes mean
+    expression and dot size encodes the fraction of cells expressing the gene
+    above ``detect_threshold``. Useful for assessing cross-study
+    reproducibility of marker gene expression patterns.
 
-    Dot semantics
-    -------------
-    * Color: mean value per (cluster, study) bin.
-    * Size:  fraction of cells with value > `detect_threshold`.
-    * Low-support / missing: grey at minimum size.
+    ``color`` is resolved first as a gene name in ``adata.var_names``; if no
+    match is found it falls back to a numeric column in ``adata.obs``.
+
+    Parameters
+    ----------
+    adata : anndata.AnnData
+        Reference dataset containing expression data and ``obs`` columns
+        for ``groupby`` and ``study_col``.
+    color : str
+        Gene name or numeric ``obs`` column to visualize.
+    groupby : str, default ``"ZMAP_CellType"``
+        ``obs`` column whose categories form the rows.
+    study_col : str, default ``"study_id"``
+        ``obs`` column containing study identifiers (columns).
+    layer : str or None, default ``"tpm_log"``
+        Layer to use for expression values.
+    use_raw : bool or None, default ``None``
+        If ``True``, use ``adata.raw``.
+    detect_threshold : float, default ``0.0``
+        Minimum value for a cell to count as "expressing".
+    show : bool, default ``True``
+        Call ``plt.show()`` after rendering.
+    cmap : str, default ``"viridis"``
+        Colormap for mean expression.
+    vmin, vmax : float or None
+        Color scale limits.
+    standard_scale : str or None, default ``None``
+        Scale values per study (``"study"``) or per cluster (``"cluster"``).
+    s_min, s_max : float
+        Dot size range in points squared.
+    cluster_order : list of str or None
+        Explicit row ordering. Defaults to the canonical ZMAP CellType order.
+    study_order : list of str or None
+        Explicit column ordering. Defaults to the canonical ZMAP study order.
+    omit_groups : list of str or None
+        Cell-type labels to exclude.
+    row_color_groups : dict or None
+        ``{color: [group, ...]}`` mapping to color row labels by lineage.
+    row_dividers : list of int or None
+        Row indices at which to draw horizontal divider lines.
+    return_long : bool, default ``False``
+        Also return the underlying long-form DataFrame.
+
+    Returns
+    -------
+    tuple of (matplotlib.axes.Axes, pd.DataFrame or None)
+        ``(ax, long_df)`` where ``long_df`` is the aggregated data table
+        when ``return_long=True``, otherwise ``None``.
+
+    Examples
+    --------
+    >>> ax, _ = zmap.dotplot.dotplot_gene.gene_groups_vs_studies(adata_ref, "myod1")
     """
     color = str(color)
 

@@ -798,6 +798,59 @@ def plot_dotplot_basegrid(
     ax_leg: plt.Axes | None = None,
     adjust_right_gutter: bool = True,
 ):
+    """
+    Low-level rendering engine for ZMAP dotplots.
+
+    Takes a design DataFrame specifying which ``(cell type, gene)`` pairs to
+    plot, computes mean expression and fraction-expressing statistics from
+    ``adata``, and renders the result as a scatter-based dotplot with optional
+    support rings, consensus panels, time strips, colorbars, and size legends.
+
+    This function is the shared backend for :func:`group_siblings_vs_markers`
+    and :func:`group_descendants_vs_markers`. Most users should call one of
+    those higher-level wrappers instead of invoking this directly.
+
+    Parameters
+    ----------
+    adata : anndata.AnnData
+        Reference dataset containing expression data and ``obs`` annotations.
+    design_df : pd.DataFrame
+        Long-form table with at least columns ``["celltype", "gene"]``.
+        Each row defines one dot in the grid. An optional ``support_ratio``
+        column adds consensus-support rings.
+    groupby : str, default ``"ZMAP_CellType"``
+        ``obs`` column whose categories form the rows of the dotplot.
+    layer : str or None, default ``None``
+        Layer to use for expression values. Falls back to ``adata.X``.
+    use_raw : bool or None, default ``None``
+        If ``True``, use ``adata.raw`` for expression. Overrides ``layer``.
+    detect_threshold : float, default ``0.0``
+        Minimum value for a cell to count as "expressing".
+    cmap : str, default ``"Blues"``
+        Matplotlib colormap for dot fill color (mean expression).
+    vmin, vmax : float or None
+        Colormap normalization limits. Inferred from data when ``None``.
+    standard_scale : ``"var"``, ``"obs"``, or None, default ``None``
+        Scale mean expression per gene (``"var"``) or per group (``"obs"``).
+    s_min, s_max : float, default ``1`` and ``80``
+        Minimum and maximum dot sizes (points squared).
+    add_support_ring : bool, default ``True``
+        Draw orange rings whose thickness encodes ``support_ratio``.
+    consensus_panel : str or None, default ``None``
+        Type of consensus summary panel above the dotplot. One of
+        ``None``, ``"line"``, ``"support_grid"``, ``"stacked_bar"``, ``"strip"``.
+    left_time_strip : bool, default ``False``
+        Draw a vertical developmental-time strip to the left of the dotplot.
+    ax : matplotlib.axes.Axes or None, default ``None``
+        Pre-existing axes to draw into. A new figure is created when ``None``.
+
+    Returns
+    -------
+    tuple of (matplotlib.axes.Axes, pd.DataFrame)
+        ``(ax, grid)`` where ``ax`` is the dotplot axes and ``grid`` is the
+        long-form DataFrame used for rendering, with computed columns
+        ``mean_expr``, ``frac_pos``, and positional indices.
+    """
     # --------------------- validation & ordering ---------------------
     if not {"celltype", "gene"}.issubset(design_df.columns):
         raise ValueError("design_df must contain columns: 'celltype' and 'gene'.")
