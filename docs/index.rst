@@ -13,10 +13,11 @@ curated markers or generate publication-ready dotplots.
 
    import zmap
 
-   adata_ref = zmap.ref.load_zmap_h5ad(kind="symphony")
+   # Fetch data
+   adata_ref = zmap.ref.load_zmap_h5ad()
 
    # Browse curated marker genes
-   markers = zmap.ref.load_markers()
+   markers = zmap.ref.load_markers(level='CellType', groups=['diencephalon'], n_per_group=10, format='dict')
 
    # Visualize expression across cell types
    zmap.dotplot.gene_view(adata_ref, "sox2")
@@ -41,7 +42,7 @@ Key Features
   specificity, contrast, consensus, and prevalence.
 - **Dotplots** — publication-ready dotplots showing expression across
   cell types, timepoints, and studies.
-- **Label transfer** — kNN-based cell-type annotation using Symphony/Harmony
+- **Label transfer** — kNN-based cell-type annotation batch-corected
   embeddings, with per-cell confidence scoring and QC filters.
 
 .. toctree::
