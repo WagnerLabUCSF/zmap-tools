@@ -15,19 +15,6 @@ From GitHub (development)
 
    pip install git+https://github.com/WagnerLabUCSF/zmap-tools.git
 
-Google Colab
-------------
-
-.. code-block:: bash
-
-   pip install git+https://github.com/WagnerLabUCSF/zmap-tools.git
-
-For Symphony-based label transfer, you also need ``symphonypy``:
-
-.. code-block:: bash
-
-   pip install symphonypy
-
 
 Dependencies
 ------------

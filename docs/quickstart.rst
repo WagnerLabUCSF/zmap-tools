@@ -9,7 +9,7 @@ Loading Reference Data
 ----------------------
 
 The :func:`~zmap.reference.load_zmap_h5ad` function downloads and caches
-ZMAP reference H5AD files. On Google Colab with Drive mounted, files persist
+ZMAP reference H5AD files. On Google Colab with Drive mounted, cache persists
 across sessions.
 
 .. code-block:: python
