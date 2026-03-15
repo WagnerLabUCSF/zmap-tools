@@ -17,7 +17,7 @@ curated markers or generate publication-ready dotplots.
    adata_ref = zmap.ref.load_zmap_h5ad()
 
    # Browse curated marker genes
-   markers = zmap.ref.load_markers(level='CellType', groups=['diencephalon'], n_per_group=10, format='dict')
+   markers = zmap.ref.load_consensus_markers(groups=['diencephalon'], format='table', n_per_group=10)
 
    # Visualize expression across cell types
    zmap.dotplot.gene_view(adata_ref, "sox2")
