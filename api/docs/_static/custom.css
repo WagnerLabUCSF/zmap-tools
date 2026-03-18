@@ -1,0 +1,11 @@
+/* Custom styles for zmap-tools documentation */
+
+/* Widen the content area slightly */
+.wy-nav-content {
+    max-width: 900px;
+}
+
+/* Style parameter lists more readably */
+dl.field-list > dt {
+    font-weight: bold;
+}
