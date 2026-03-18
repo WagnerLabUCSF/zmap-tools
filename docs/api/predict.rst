@@ -23,6 +23,8 @@ Preprocessing
 kNN Label Transfer
 ------------------
 
+.. autofunction:: predict_label_tissue_kNN
+
 .. autofunction:: predict_labels_kNN
 
 

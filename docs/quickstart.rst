@@ -80,6 +80,14 @@ For finer control, the individual steps are also exposed:
        n_neighbors=25,
    )
 
+   # 2b. Optional: tissue-aware kNN (same step-4 summary interface)
+   zmap.predict.predict_label_tissue_kNN(
+       adata_query, adata_ref,
+       ref_label_col="ZMAP_CellType",
+       tissue_mode="hard",
+       knn_backend="auto",
+   )
+
    # 3. Cluster-level summary
    df = zmap.predict.aggregate_by_cluster(
        adata_query,
