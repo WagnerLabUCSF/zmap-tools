@@ -1,1 +1,12 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Packaging artifacts
+*.egg-info/
+dist/
+build/
+
+# Misc
 .DS_Store
