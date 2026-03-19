@@ -407,7 +407,7 @@ def _compute_tissue_aware_neighbors(
     return idx_out, dist_out, knn_meta
 
 
-def predict_label_tissue_kNN(
+def predict_labels_tissue_kNN(
     adata_query,
     adata_ref,
     *,
@@ -511,22 +511,22 @@ def predict_label_tissue_kNN(
 
     if pseudo_tissue_k is not None or float(pseudo_tissue_threshold) > 0:
         print(
-            "[ZMAP] predict_label_tissue_kNN: pseudo_tissue_k / pseudo_tissue_threshold "
+            "[ZMAP] predict_labels_tissue_kNN: pseudo_tissue_k / pseudo_tissue_threshold "
             "are accepted for API compatibility but not used in this function."
         )
     if float(class_prior_alpha) != 0.0:
         print(
-            "[ZMAP] predict_label_tissue_kNN: class_prior_alpha is accepted for "
+            "[ZMAP] predict_labels_tissue_kNN: class_prior_alpha is accepted for "
             "API compatibility but not used in predict_labels_kNN voting."
         )
     if float(margin_threshold) > 0:
         print(
-            "[ZMAP] predict_label_tissue_kNN: margin_threshold is accepted for API "
+            "[ZMAP] predict_labels_tissue_kNN: margin_threshold is accepted for API "
             "compatibility but not applied in predict_labels_kNN."
         )
     if bool(run_time_prediction):
         print(
-            "[ZMAP] predict_label_tissue_kNN: run_time_prediction/time_* parameters "
+            "[ZMAP] predict_labels_tissue_kNN: run_time_prediction/time_* parameters "
             "are accepted for API compatibility. Time transfer is controlled by "
             "predict_labels_kNN(time_labels=...)."
         )
@@ -2685,7 +2685,7 @@ def annotate_with_zmap(
        into the reference UMAP (requires ``symphonypy``).
     3. **Label transfer** — kNN voting to assign cell-type, tissue, and time labels
        (``predict_labels_kNN``; optional tissue-aware mode via
-       ``predict_label_tissue_kNN``).
+       ``predict_labels_tissue_kNN``).
     4. **Summarize** — store a simplified run summary in
        ``adata_query.uns['zmap_labels'][<space>]['Run Summary Simple']``.
     5. **Plot** — overlay query cells on the reference UMAP with on-data labels
@@ -2736,7 +2736,7 @@ def annotate_with_zmap(
     predict_kwargs : dict or None, default ``None``
         Extra keyword arguments forwarded to ``predict_labels_kNN``.
         Set ``{"use_tissue_aware_knn": True}`` to route step-3 transfer to
-        ``predict_label_tissue_kNN`` instead (same step-4 summary format).
+        ``predict_labels_tissue_kNN`` instead (same step-4 summary format).
     print_summary : bool, default ``True``
         Print a brief progress log and final summary to stdout.
     show_plots : bool, default ``True``
@@ -2877,7 +2877,7 @@ def annotate_with_zmap(
 
     if use_tissue_aware_knn:
         print("[ZMAP] Using tissue-aware kNN transfer...")
-        predict_label_tissue_kNN(
+        predict_labels_tissue_kNN(
             adata_query,
             adata_ref,
             ref_label_col=ref_label_col,
