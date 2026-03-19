@@ -2997,7 +2997,7 @@ def annotate_with_zmap(
             )
             mapping_df = map_query_labels(
                 adata_query,
-                obs_A=ref_label_col,
+                obs_A=ref_label_col+'_predicted',
                 obs_B=cluster_col,
                 normalize="row",
                 show_plot=show_plots,
