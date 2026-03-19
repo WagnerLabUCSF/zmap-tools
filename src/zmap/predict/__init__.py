@@ -10,6 +10,7 @@ cluster aggregation, and UMAP overlay plotting.
 
 from .predict import (
     preprocess_adata_query,
+    predict_label_tissue_kNN,
     predict_labels_kNN,
     summarize_knn_run,
     aggregate_by_cluster,
@@ -23,6 +24,7 @@ from .predict import (
 
 __all__ = [
     "preprocess_adata_query",
+    "predict_label_tissue_kNN",
     "predict_labels_kNN",
     "summarize_knn_run",
     "aggregate_by_cluster",
