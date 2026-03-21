@@ -31,6 +31,7 @@ from .predict import (
     plot_overlap_matrix,
     show_summary,
     validate_markers,
+    plot_marker_comparison,
 )
 
 __all__ = [
@@ -52,4 +53,5 @@ __all__ = [
     "plot_overlap_matrix",
     "show_summary",
     "validate_markers",
+    "plot_marker_comparison",
 ]
