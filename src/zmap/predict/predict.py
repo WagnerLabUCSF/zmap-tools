@@ -930,7 +930,7 @@ def predict_labels_kNN(
             cache.get('knn_nprobe_requested', None) == (None if knn_nprobe is None else int(knn_nprobe))
         )
         if same_config:
-            print("Reusing cached neighbor graph from adata_query.uns['zmap_neighbors'] (filtered).")
+            print("[ZMAP] Reusing cached neighbor graph from adata_query.uns['zmap_neighbors'] (filtered).")
             neighbor_indices = cache['indices']
             distances = cache['distances']
             knn_meta = {
@@ -942,7 +942,7 @@ def predict_labels_kNN(
             reuse_neighbors = True
 
     if not reuse_neighbors:
-        print("Computing new kNN graph on filtered reference...")
+        print("[ZMAP] Computing new kNN graph on filtered reference...")
         neighbor_indices, distances, knn_meta = knn_search(
             X_ref,
             adata_query.obsm[query_basis],
@@ -953,7 +953,7 @@ def predict_labels_kNN(
             nprobe=knn_nprobe,
         )
         print(
-            "kNN backend: requested={req}/{dev}, used={used}/{udev}".format(
+            "[ZMAP] kNN backend: requested={req}/{dev}, used={used}/{udev}".format(
                 req=knn_meta.get("backend_requested", knn_backend),
                 dev=knn_meta.get("device_requested", knn_device),
                 used=knn_meta.get("backend_used", "sklearn"),
@@ -975,7 +975,7 @@ def predict_labels_kNN(
             'knn_backend_used': knn_meta.get("backend_used", "sklearn"),
             'knn_device_used': knn_meta.get("device_used", "cpu"),
         }
-        print("Cached neighbor graph saved in adata_query.uns['zmap_neighbors'].")
+        print("[ZMAP] Cached neighbor graph in adata_query.uns['zmap_neighbors'].")
 
     # ---------- classes & priors (from filtered ref) ----------
     sorted_classes = np.sort(pd.Series(ref_labels).dropna().astype(str).unique())
@@ -1115,7 +1115,7 @@ def predict_labels_kNN(
         predicted_time_labels = out
         adata_query.obs[f"{time_base}_unfilt"] = predicted_time_labels
 
-    print("Predictions complete.")
+    print("[ZMAP] Predictions complete.")
 
     # =======================
     #     QC FILTERING
@@ -1132,7 +1132,7 @@ def predict_labels_kNN(
             accept = pd.Series(True, index=adata_query.obs.index)
             reason = np.array(["auto"] * len(accept), dtype=object)
             reason_categories = ["auto"]
-            print("QC skipped: p_thresh=None and d_thresh=None → accepting all cells.")
+            print("[ZMAP] QC skipped: p_thresh=None and d_thresh=None → accepting all cells.")
         else:
             accept = pd.Series(False, index=adata_query.obs.index)
             if use_prob:
@@ -1152,7 +1152,7 @@ def predict_labels_kNN(
                 reason = np.where(d_ok, "distance", "none")
                 reason_categories = ["distance", "none"]
 
-            print(f"QC applied with active rules: "
+            print(f"[ZMAP] QC applied with active rules: "
                   f"{'prob' if use_prob else ''}{' & ' if use_prob and use_dist else ''}{'distance' if use_dist else ''}.")
 
         adata_query.obs[col_reason] = pd.Categorical(reason, categories=reason_categories)
@@ -1163,7 +1163,7 @@ def predict_labels_kNN(
 
         n_total = len(accept)
         n_accept = int(accept.sum())
-        print(f"{n_accept} accepted / {n_total} total ({n_total - n_accept} rejected).")
+        print(f"[ZMAP] {n_accept} accepted / {n_total} total ({n_total - n_accept} rejected).")
 
         # ---------- QC PLOTTING & OPTIONAL SAVE ----------
         if plot_mapping_qc:
@@ -1213,7 +1213,7 @@ def predict_labels_kNN(
 
     # ---------- rare label filter ----------
     if min_cells_per_label is not None and min_cells_per_label > 0:
-        print(f"Filtering labels with fewer than {min_cells_per_label} assigned cells...")
+        print(f"[ZMAP] Filtering labels with fewer than {min_cells_per_label} assigned cells...")
         label_counts = adata_query.obs[col_main].value_counts(dropna=True)
         rare_labels = label_counts[label_counts < min_cells_per_label].index
         if len(rare_labels) > 0:
@@ -1221,7 +1221,7 @@ def predict_labels_kNN(
             adata_query.obs.loc[adata_query.obs[col_rareflag], col_main] = pd.NA
             adata_query.uns.setdefault('zmap_labels', {}).setdefault(space, {})
             adata_query.uns['zmap_labels'][space]['Rare Labels'] = list(rare_labels)
-            print(f"Filtered {len(rare_labels)} rare labels: {list(rare_labels[:10])}{'...' if len(rare_labels) > 10 else ''}")
+            print(f"[ZMAP] Filtered {len(rare_labels)} rare labels: {list(rare_labels[:10])}{'...' if len(rare_labels) > 10 else ''}")
 
     # ---------- final time assignment ----------
     if time_base is not None and predicted_time_labels is not None:
@@ -1323,11 +1323,11 @@ def predict_labels_kNN(
     # ---------- evaluation (unchanged) ----------
     if evaluate:
         if not query_truth_col or query_truth_col not in adata_query.obs.columns:
-            print(f"Evaluation skipped: ground-truth column '{query_truth_col}' not found in adata_query.obs.")
-            print(f"Finished predicting and annotating: {space}")
+            print(f"[ZMAP] Evaluation skipped: ground-truth column '{query_truth_col}' not found in adata_query.obs.")
+            print(f"[ZMAP] Finished predicting and annotating: {space}")
             return
 
-        print("Evaluating model performance on ACCEPTED predictions only...")
+        print("[ZMAP] Evaluating model performance on ACCEPTED predictions only...")
         has_truth = ~adata_query.obs[query_truth_col].isna()
         not_rejected = (~adata_query.obs[col_reject].fillna(True)) if (apply_filters and col_reject in adata_query.obs) else True
         has_pred = ~adata_query.obs[col_main].isna()
@@ -1335,8 +1335,8 @@ def predict_labels_kNN(
 
         n_eval = int(eval_mask.sum())
         if n_eval == 0:
-            print("No accepted rows available for evaluation after filtering; metrics not computed.")
-            print(f"Finished predicting and annotating: {space}")
+            print("[ZMAP] No accepted rows available for evaluation after filtering; metrics not computed.")
+            print(f"[ZMAP] Finished predicting and annotating: {space}")
             return
 
         true_labels_values      = adata_query.obs.loc[eval_mask, query_truth_col].astype(str).values
@@ -1347,8 +1347,8 @@ def predict_labels_kNN(
         predicted_classes = set(np.unique(predicted_labels_values))
         overlapping_classes = sorted(true_classes.intersection(predicted_classes))
         if len(overlapping_classes) == 0:
-            print("No overlapping classes between true and predicted after filtering; metrics not computed.")
-            print(f"Finished predicting and annotating: {space}")
+            print("[ZMAP] No overlapping classes between true and predicted after filtering; metrics not computed.")
+            print(f"[ZMAP] Finished predicting and annotating: {space}")
             return
 
         y_true_binarized = label_binarize(true_labels_values, classes=overlapping_classes)
@@ -1396,7 +1396,7 @@ def predict_labels_kNN(
         print(metrics_dict["Aggregate Metrics"])
 
         if plot_eval_curves:
-            print("Plotting ROC and PR curves...")
+            print("[ZMAP] Plotting ROC and PR curves...")
             for i, label in enumerate(overlapping_classes):
                 plt.figure(figsize=(8, 4))
                 fpr, tpr, _ = roc_curve(y_true_binarized[:, i], probabilities_eval[:, i])
@@ -1409,7 +1409,7 @@ def predict_labels_kNN(
                 plt.title(f"Precision–Recall – {label}"); plt.xlabel("Recall"); plt.ylabel("Precision")
                 plt.tight_layout(); plt.show()
 
-    print(f"Finished predicting and annotating: {space}")
+    print(f"[ZMAP] Finished predicting and annotating: {space}")
 
 
 def predict_labels_tissue_kNN(
@@ -1789,7 +1789,7 @@ def predict_labels_tissue_kNN(
             "knn_device_used": knn_meta.get("device_used", "cpu"),
         }
     else:
-        print("Reusing cached tissue-aware neighbor graph from adata_query.uns['zmap_neighbors'].")
+        print("[ZMAP] Reusing cached tissue-aware neighbor graph from adata_query.uns['zmap_neighbors'].")
 
     predict_labels_kNN(
         adata_query,
@@ -2584,18 +2584,20 @@ def plot_embedding_with_ondata_labels(
 
     # ---- sync palettes using base obs key (before _predicted) ----
     base_obs = color_key.replace("_predicted", "")
-    try:
-        # ensure reference has its color map
-        sync_zmap_colors(adata_ref, obs_key=base_obs)
-        # sync query colors from reference — use color_key (the _predicted col
-        # that actually exists in query .obs), look up ref palette via base_obs
-        sync_zmap_colors(adata_test_plot, obs_key=color_key, ref_adata=adata_ref, ref_obs_key=base_obs)
-    except Exception as e:
-        warnings.warn(
-            f"[ZMAP] sync_zmap_colors failed for '{color_key}': {e}. "
-            "Falling back to _color_map dict or positional palette.",
-            stacklevel=2,
-        )
+
+    # Only attempt sync if there's no _color_map dict already available
+    # (annotate_with_zmap populates _color_map from reference colormaps)
+    cmap_dict_key = f"{base_obs}_color_map"
+    if cmap_dict_key not in adata_test_plot.uns:
+        try:
+            sync_zmap_colors(adata_ref, obs_key=base_obs)
+            sync_zmap_colors(adata_test_plot, obs_key=color_key, ref_adata=adata_ref, ref_obs_key=base_obs)
+        except Exception as e:
+            warnings.warn(
+                f"[ZMAP] sync_zmap_colors failed for '{color_key}': {e}. "
+                "Falling back to _color_map dict or positional palette.",
+                stacklevel=2,
+            )
 
     # ---- palette construction ----
     if palette is None:
@@ -2796,6 +2798,10 @@ def plot_embedding_with_ondata_labels(
         # ---- SHOW FIGURE ----
         if show:
             plt.show()
+        else:
+            # Close figure to prevent Jupyter/Colab inline backend from
+            # auto-displaying it at cell completion
+            plt.close(fig)
 
     # ---- RETURN AXES (OPTIONAL) ----
     if return_ax:
@@ -2960,7 +2966,7 @@ def map_query_labels(
     # 5. Plotting
     # --------------------------------------------------------------------------
     fig = None
-    if show_plot:
+    if show_plot or save_plots:
         plt.rcParams["axes.grid"] = False
         fig, ax = plt.subplots(figsize=(figsize, figsize))
 
@@ -3024,6 +3030,13 @@ def map_query_labels(
         out_csv = os.path.join(output_dir, f"{prefix}_{obs_B}_top_label.csv")
         mapping_df.to_csv(out_csv)
         print(f"[ZMAP] Saved top-label mapping → {out_csv}")
+
+    # Show or close the figure
+    if fig is not None:
+        if show_plot:
+            plt.show()
+        else:
+            plt.close(fig)
 
     # --------------------------------------------------------------------------
     # 8. Return mapping_df or None
@@ -3289,14 +3302,18 @@ def annotate_with_zmap(
             ) from e
 
         t0_map = time.time()
-        sp.tl.map_embedding(adata_query, adata_ref)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", FutureWarning)
+            sp.tl.map_embedding(adata_query, adata_ref)
         if v >= 1:
             print(f"[ZMAP] Mapping complete ({time.time() - t0_map:.0f}s).")
 
         if do_ingest:
             if v >= 1:
                 print("[ZMAP] Ingesting query into reference UMAP...")
-            sp.tl.ingest(adata_query=adata_query, adata_ref=adata_ref)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", FutureWarning)
+                sp.tl.ingest(adata_query=adata_query, adata_ref=adata_ref)
             if v >= 1:
                 print("[ZMAP] Ingestion complete.")
 
