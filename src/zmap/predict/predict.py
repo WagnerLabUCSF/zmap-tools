@@ -1382,7 +1382,7 @@ def predict_labels_kNN(
     adata_query.uns.setdefault('zmap_labels', {}).setdefault(space, {})
     adata_query.uns['zmap_labels'][space]["Run Summary"] = run_summary
 
-    # ---------- evaluation (unchanged) ----------
+    # ---------- evaluation ----------
     if evaluate:
         if not query_truth_col or query_truth_col not in adata_query.obs.columns:
             _zlog(f"Evaluation skipped: ground-truth column '{query_truth_col}' not found in adata_query.obs.")
@@ -1434,42 +1434,77 @@ def predict_labels_kNN(
             class_auroc[label] = auc(fpr, tpr)
         macro_auroc = roc_auc_score(y_true_binarized, probabilities_eval, average='macro')
 
-        metrics_dict = {
-            "Aggregate Metrics": pd.DataFrame({
-                "Metric": ["Accuracy", "Macro Precision", "Macro Recall", "Macro F1", "Macro AUROC"],
-                "Score": [accuracy, macro_precision, macro_recall, macro_f1, macro_auroc],
-            }),
-            "Class-Specific Metrics": pd.DataFrame({
-                "Class": overlapping_classes,
-                "Precision": per_class[0],
-                "Recall": per_class[1],
-                "F1-Score": per_class[2],
-                "AUROC": [class_auroc[label] for label in overlapping_classes],
-                "Support": per_class[3],
-            }),
+        df_aggregate = pd.DataFrame({
+            "Metric": ["Accuracy", "Macro Precision", "Macro Recall", "Macro F1", "Macro AUROC"],
+            "Score": [accuracy, macro_precision, macro_recall, macro_f1, macro_auroc],
+        })
+        df_per_class = pd.DataFrame({
+            "Class": overlapping_classes,
+            "Precision": per_class[0],
+            "Recall": per_class[1],
+            "F1-Score": per_class[2],
+            "AUROC": [class_auroc[label] for label in overlapping_classes],
+            "Support": per_class[3],
+        })
+
+        # Store evaluation results (merge into existing uns, don't overwrite)
+        adata_query.uns.setdefault('zmap_labels', {}).setdefault(space, {})
+        adata_query.uns['zmap_labels'][space]["Evaluation"] = {
+            "Aggregate Metrics": df_aggregate,
+            "Class-Specific Metrics": df_per_class,
             "Confusion Matrix": cm_df,
             "Eval N": n_eval,
         }
 
-        metrics_dict["Run Summary"] = adata_query.uns['zmap_labels'].get(space, {}).get("Run Summary")
-        adata_query.uns.setdefault('zmap_labels', {})
-        adata_query.uns['zmap_labels'][space] = metrics_dict
+        _zlog(f"Evaluation complete ({n_eval:,} cells):")
+        _display_df(df_aggregate)
 
-        print(metrics_dict["Aggregate Metrics"])
+        # ---- Evaluation output directory ----
+        eval_dir = os.path.join(output_dir, "evaluation")
+        if save_mapping_qc:
+            os.makedirs(eval_dir, exist_ok=True)
+            # Save metric tables
+            df_aggregate.to_csv(os.path.join(eval_dir, f"{labels_base}_eval_aggregate.csv"), index=False)
+            df_per_class.to_csv(os.path.join(eval_dir, f"{labels_base}_eval_per_class.csv"), index=False)
+            cm_df.to_csv(os.path.join(eval_dir, f"{labels_base}_eval_confusion_matrix.csv"))
+            _zlog(f"Saved evaluation tables → {eval_dir}/")
 
+        # ---- Plot ROC / PR curves ----
         if plot_eval_curves:
             _zlog("Plotting ROC and PR curves...")
             for i, label in enumerate(overlapping_classes):
-                plt.figure(figsize=(8, 4))
+                fig_eval, (ax_roc, ax_pr) = plt.subplots(1, 2, figsize=(8, 4))
+
                 fpr, tpr, _ = roc_curve(y_true_binarized[:, i], probabilities_eval[:, i])
-                precision, recall, _ = precision_recall_curve(y_true_binarized[:, i], probabilities_eval[:, i])
+                precision_vals, recall_vals, _ = precision_recall_curve(y_true_binarized[:, i], probabilities_eval[:, i])
 
-                plt.subplot(1, 2, 1); plt.plot(fpr, tpr, label=f"AUC={auc(fpr,tpr):.2f}"); plt.plot([0, 1], [0, 1], 'k--')
-                plt.title(f"ROC – {label}"); plt.xlabel("False Positive Rate"); plt.ylabel("True Positive Rate"); plt.legend()
+                ax_roc.plot(fpr, tpr, label=f"AUC={auc(fpr, tpr):.2f}")
+                ax_roc.plot([0, 1], [0, 1], 'k--')
+                ax_roc.set_title(f"ROC – {label}")
+                ax_roc.set_xlabel("False Positive Rate")
+                ax_roc.set_ylabel("True Positive Rate")
+                ax_roc.legend()
 
-                plt.subplot(1, 2, 2); plt.plot(recall, precision)
-                plt.title(f"Precision–Recall – {label}"); plt.xlabel("Recall"); plt.ylabel("Precision")
-                plt.tight_layout(); plt.show()
+                ax_pr.plot(recall_vals, precision_vals)
+                ax_pr.set_title(f"Precision–Recall – {label}")
+                ax_pr.set_xlabel("Recall")
+                ax_pr.set_ylabel("Precision")
+
+                fig_eval.tight_layout()
+
+                if save_mapping_qc:
+                    os.makedirs(eval_dir, exist_ok=True)
+                    safe_label = label.replace("/", "_").replace(" ", "_")
+                    fig_path = os.path.join(eval_dir, f"{labels_base}_eval_{safe_label}.png")
+                    fig_eval.savefig(fig_path, dpi=300, bbox_inches="tight")
+
+                if show_qc_plots:
+                    plt.show()
+                else:
+                    plt.close(fig_eval)
+
+            if save_mapping_qc:
+                _zlog(f"Saved {len(overlapping_classes)} evaluation figures → {eval_dir}/")
 
     _zlog(f"Finished predicting and annotating: {space}")
 
