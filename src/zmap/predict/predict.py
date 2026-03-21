@@ -3811,7 +3811,7 @@ def validate_markers(
     groupby: str,
     *,
     ref_label_col: str = "ZMAP_CellType",
-    n_query_markers: int = 100,
+    n_query_markers: int = 20,
     n_ref_markers: int = 100,
     max_cells_per_group: int = 2000,
     method: str = "wilcoxon",
@@ -3844,7 +3844,7 @@ def validate_markers(
     ref_label_col : str, default ``"ZMAP_CellType"``
         Reference label column, used to determine which ZMAP marker ledger
         to load (e.g. ``"ZMAP_CellType"`` → ``"CellType"`` level).
-    n_query_markers : int, default ``100``
+    n_query_markers : int, default ``20``
         Number of top DE genes to consider per group.
     n_ref_markers : int, default ``100``
         Number of top reference markers to load per group from the ZMAP
