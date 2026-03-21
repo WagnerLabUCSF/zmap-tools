@@ -3891,11 +3891,18 @@ def validate_markers(
     """
     from zmap.reference.markers import load_consensus_markers
 
-    # ---- Resolve marker level from ref_label_col ----
-    marker_level = _MARKER_LEVEL_KEY.get(ref_label_col)
+    # ---- Resolve marker level: infer from groupby, fall back to ref_label_col ----
+    # Try to detect level from groupby column name (e.g. "ZMAP_Tissue_predicted" → "Tissue")
+    _inferred_ref = None
+    for _key in _MARKER_LEVEL_KEY:
+        if groupby.startswith(_key):
+            _inferred_ref = _key
+            break
+    _effective_ref = _inferred_ref or ref_label_col
+    marker_level = _MARKER_LEVEL_KEY.get(_effective_ref)
     if marker_level is None:
-        # Try stripping "ZMAP_" prefix as fallback
-        marker_level = ref_label_col.replace("ZMAP_", "")
+        # Last resort: strip "ZMAP_" and trailing suffixes
+        marker_level = _effective_ref.replace("ZMAP_", "").replace("_predicted", "").replace("_truth", "")
     _zlog(f"Loading ZMAP reference markers (level={marker_level!r}, top {n_ref_markers})...")
     ref_markers = load_consensus_markers(
         level=marker_level,
@@ -3982,6 +3989,115 @@ def validate_markers(
         _zlog(f"Saved marker validation → {csv_path}")
 
     return df_result
+
+
+def plot_marker_comparison(
+    df_a: pd.DataFrame,
+    df_b: pd.DataFrame,
+    *,
+    label_a: str = "Predicted",
+    label_b: str = "Ground truth",
+    title: str = "Marker overlap with ZMAP reference",
+    sort_by: str = "a",
+    min_cells: int = 0,
+    figsize: tuple[float, float] | None = None,
+    save: str | None = None,
+) -> None:
+    """
+    Paired horizontal bar chart comparing marker validation results.
+
+    Merges two ``validate_markers`` DataFrames on the ``group`` column and
+    plots ``pct_overlap`` side by side for each cell type.
+
+    Parameters
+    ----------
+    df_a, df_b : pd.DataFrame
+        Output of ``validate_markers`` for two different ``groupby`` columns
+        (e.g. predicted labels vs ground-truth annotations).
+    label_a, label_b : str
+        Legend labels for the two sets of bars.
+    title : str
+        Plot title.
+    sort_by : str, default ``"a"``
+        Sort groups by: ``"a"`` (df_a overlap descending), ``"b"``,
+        ``"diff"`` (a − b descending), or ``"name"`` (alphabetical).
+    min_cells : int, default ``0``
+        Exclude groups with fewer than this many cells in either set.
+    figsize : tuple or None
+        Figure size. Auto-scaled to number of groups when ``None``.
+    save : str or None
+        Path to save the figure. ``None`` to skip saving.
+
+    Examples
+    --------
+    >>> df_pred  = zmap.predict.validate_markers(adata, groupby="ZMAP_CellType_predicted")
+    >>> df_truth = zmap.predict.validate_markers(adata, groupby="manual_annotation")
+    >>> zmap.predict.plot_marker_comparison(df_pred, df_truth)
+    """
+    # Merge on group
+    merged = pd.merge(
+        df_a[["group", "n_cells", "pct_overlap"]].rename(
+            columns={"pct_overlap": "pct_a", "n_cells": "n_cells_a"}
+        ),
+        df_b[["group", "n_cells", "pct_overlap"]].rename(
+            columns={"pct_overlap": "pct_b", "n_cells": "n_cells_b"}
+        ),
+        on="group",
+        how="outer",
+    ).fillna(0)
+
+    # Filter by min_cells
+    if min_cells > 0:
+        merged = merged[
+            (merged["n_cells_a"] >= min_cells) & (merged["n_cells_b"] >= min_cells)
+        ]
+
+    # Sort
+    if sort_by == "a":
+        merged = merged.sort_values("pct_a", ascending=True)
+    elif sort_by == "b":
+        merged = merged.sort_values("pct_b", ascending=True)
+    elif sort_by == "diff":
+        merged = merged.assign(_diff=merged["pct_a"] - merged["pct_b"])
+        merged = merged.sort_values("_diff", ascending=True).drop(columns=["_diff"])
+    else:
+        merged = merged.sort_values("group", ascending=False)
+
+    n = len(merged)
+    if n == 0:
+        _zlog("No overlapping groups to plot.")
+        return
+
+    if figsize is None:
+        figsize = (6, max(3, n * 0.35))
+
+    y = np.arange(n)
+    bar_h = 0.35
+
+    fig, ax = plt.subplots(figsize=figsize)
+    ax.barh(y + bar_h / 2, merged["pct_a"].values, bar_h, label=label_a, color="steelblue", alpha=0.85)
+    ax.barh(y - bar_h / 2, merged["pct_b"].values, bar_h, label=label_b, color="coral", alpha=0.85)
+
+    ax.set_yticks(y)
+    ax.set_yticklabels(merged["group"].values, fontsize=8)
+    ax.set_xlabel("% overlap (top-20 DE ∩ top-100 ref)")
+    ax.set_title(title)
+    ax.legend(loc="lower right", fontsize=9)
+    ax.set_xlim(0, max(merged[["pct_a", "pct_b"]].max().max() * 1.15, 10))
+
+    # Mean lines
+    mean_a = merged["pct_a"].mean()
+    mean_b = merged["pct_b"].mean()
+    ax.axvline(mean_a, color="steelblue", linestyle="--", linewidth=0.8, alpha=0.6)
+    ax.axvline(mean_b, color="coral", linestyle="--", linewidth=0.8, alpha=0.6)
+
+    fig.tight_layout()
+
+    if save:
+        fig.savefig(save, dpi=300, bbox_inches="tight")
+        _zlog(f"Saved comparison figure → {save}")
+
+    plt.show()
 
 
 # ================================================================
