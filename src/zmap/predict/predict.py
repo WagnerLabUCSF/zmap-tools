@@ -3174,6 +3174,7 @@ def annotate_with_zmap(
     do_ingest: bool = True,
     tissue_aware: bool = False,       # use tissue-aware kNN transfer
     evaluate: bool = False,           # compute accuracy metrics against query_truth_col
+    n_neighbors: int = 25,            # number of neighbors for kNN voting
 
     # --- kwargs passthroughs to lower-level steps ---
     preprocess_kwargs: Mapping[str, Any] | None = None,
@@ -3258,6 +3259,11 @@ def annotate_with_zmap(
         Compute accuracy and evaluation metrics against ``query_truth_col``.
         Requires ``query_truth_col`` to be set. Equivalent to
         ``predict_kwargs={"evaluate": True, "plot_eval_curves": True}``.
+    n_neighbors : int, default ``25``
+        Number of nearest neighbors for kNN label voting. With Gaussian
+        distance weighting (the default), 25 is robust — distant neighbors
+        are downweighted automatically, so the effective neighborhood adapts
+        to local density.
     preprocess_kwargs : dict or None, default ``None``
         Extra keyword arguments forwarded to ``preprocess_adata_query``
         (e.g. ``{"strict_counts": True}``).
@@ -3471,6 +3477,7 @@ def annotate_with_zmap(
     pk.setdefault("ref_basis", "X_pca_harmony")
     pk.setdefault("query_basis", "X_pca_harmony")
     pk.setdefault("metric", "cosine")
+    pk.setdefault("n_neighbors", n_neighbors)
     pk.setdefault("label_suffix", "predicted")   # ensures obs columns are always {space}_predicted
     pk.setdefault("output_dir", space_dir)
     # QC plots: always generate+save if save_outputs; display inline at v>=2
