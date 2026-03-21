@@ -3079,9 +3079,9 @@ def annotate_with_zmap(
     label_space: str | None = None,
     query_truth_col: str | None = None,
 
-    # --- cluster aggregation ---
-    cluster_col: str | None = None,       # user-defined clusters, e.g. "leiden"
-    query_label_col: str | None = None,   # deprecated alias for cluster_col
+    # --- query label aggregation ---
+    query_label_col: str | None = None,   # user-defined labels/clusters, e.g. "leiden"
+    cluster_col: str | None = None,       # deprecated alias for query_label_col
 
     # --- pipeline toggles ---
     do_preprocess: bool = True,
@@ -3119,6 +3119,12 @@ def annotate_with_zmap(
     6. **Map labels** *(optional)* — cross-tabulate ZMAP labels against an existing
        query labeling (e.g. Leiden clusters) via ``map_query_labels``.
 
+    All run parameters are stored in
+    ``adata_query.uns['zmap_labels'][label_space]['_run_config']`` so that
+    on-demand accessors (``plot_qc``, ``plot_embedding``, ``plot_time``,
+    ``plot_overlap_matrix``, ``show_summary``) can reproduce pipeline outputs
+    with just ``adata_query`` — no extra arguments needed.
+
     Parameters
     ----------
     adata_query : anndata.AnnData
@@ -3141,12 +3147,12 @@ def annotate_with_zmap(
     query_truth_col : str or None, default ``None``
         Ground-truth label column in ``adata_query.obs``, used for evaluation
         metrics when ``predict_kwargs`` includes ``evaluate=True``.
-    cluster_col : str or None, default ``None``
-        Column in ``adata_query.obs`` containing user-defined cluster IDs
-        (e.g. ``"leiden"``). When provided, enables cluster-level consensus
-        aggregation and the label-overlap heatmap. Recommended for most workflows.
     query_label_col : str or None, default ``None``
-        Deprecated alias for ``cluster_col``. Use ``cluster_col`` instead.
+        Column in ``adata_query.obs`` containing user-defined cluster or label
+        IDs (e.g. ``"leiden"``). When provided, enables cluster-level consensus
+        aggregation and the label-overlap matrix. Recommended for most workflows.
+    cluster_col : str or None, default ``None``
+        Deprecated alias for ``query_label_col``.
     do_preprocess : bool, default ``True``
         Run TPM normalization + log1p on the query before mapping.
         Set to ``False`` if ``adata_query.X`` is already log-normalized.
@@ -3194,12 +3200,15 @@ def annotate_with_zmap(
         - ``.obs[f"{label_space}_prob"]``                            — label confidence (0–1).
         - ``.obs["ZMAP_time_id_predicted"]``                         — predicted time (hpf).
         - ``.obsm["X_umap"]``                                        — UMAP coordinates (if ingested).
+        - ``.uns['zmap_labels']['_last_space']``                     — most recent label_space.
+        - ``.uns['zmap_labels'][label_space]['_run_config']``        — stored run parameters
+          for zero-arg on-demand plot accessors.
         - ``.uns['zmap_labels'][label_space]['Run Summary Simple']`` — key/value run summary.
         - ``.uns['zmap_labels'][label_space]['Cell Annotations']``   — per-cell table.
         - ``.uns['zmap_labels'][label_space]['Cluster Summary']``    — cluster consensus table
-          (only when ``cluster_col`` is provided).
-        - ``.uns['zmap_labels'][label_space]['Label Mapping']``      — cluster×label overlap
-          (only when ``cluster_col`` is provided).
+          (only when ``query_label_col`` is provided).
+        - ``.uns['zmap_labels'][label_space]['Label Mapping']``      — label overlap matrix
+          (only when ``query_label_col`` is provided).
 
     Examples
     --------
@@ -3208,7 +3217,7 @@ def annotate_with_zmap(
     >>> adata = zmap.predict.annotate_with_zmap(
     ...     adata_query,
     ...     query_raw_counts_source="counts",
-    ...     cluster_col="leiden",
+    ...     query_label_col="leiden",
     ... )
 
     With custom reference label and predict options:
@@ -3217,9 +3226,16 @@ def annotate_with_zmap(
     ...     adata_query,
     ...     query_raw_counts_source="X",
     ...     ref_label_col="ZMAP_Tissue",
-    ...     cluster_col="leiden",
+    ...     query_label_col="leiden",
     ...     predict_kwargs={"n_neighbors": 50},
     ... )
+
+    Re-plot any output with zero arguments:
+
+    >>> zmap.predict.plot_qc(adata)
+    >>> zmap.predict.plot_embedding(adata)
+    >>> zmap.predict.plot_overlap_matrix(adata)
+    >>> zmap.predict.show_summary(adata)
     """
 
     # Suppress UMAP "n_jobs overridden" warnings
@@ -3244,30 +3260,30 @@ def annotate_with_zmap(
             v = min(v, 1)
 
     # ------------------------------------------------------------------
-    # 0. Resolve cluster_col (handle deprecated query_label_col alias)
+    # 0. Resolve query_label_col (handle deprecated cluster_col alias)
     # ------------------------------------------------------------------
-    if query_label_col is not None and cluster_col is None:
+    if cluster_col is not None and query_label_col is None:
         warnings.warn(
-            "query_label_col is deprecated and will be removed in a future version. "
-            "Use cluster_col instead.",
+            "cluster_col is deprecated and will be removed in a future version. "
+            "Use query_label_col instead.",
             DeprecationWarning,
             stacklevel=2,
         )
-        cluster_col = query_label_col
+        query_label_col = cluster_col
 
-    if cluster_col is None:
+    if query_label_col is None:
         if v >= 1:
             print(
-                "[ZMAP] Note: no cluster_col supplied. Cluster-level consensus aggregation "
-                "will be skipped. Pass cluster_col='leiden' (or similar) for a complete summary."
+                "[ZMAP] Note: no query_label_col supplied. Cluster-level consensus aggregation "
+                "will be skipped. Pass query_label_col='leiden' (or similar) for a complete summary."
             )
-    elif cluster_col not in adata_query.obs.columns:
+    elif query_label_col not in adata_query.obs.columns:
         if v >= 1:
             print(
-                f"[ZMAP] Warning: cluster_col '{cluster_col}' not found in adata_query.obs. "
+                f"[ZMAP] Warning: query_label_col '{query_label_col}' not found in adata_query.obs. "
                 "Cluster aggregation will be skipped."
             )
-        cluster_col = None
+        query_label_col = None
 
     # ------------------------------------------------------------------
     # 1. Load reference if needed
@@ -3392,6 +3408,25 @@ def annotate_with_zmap(
         time_col_actual = f"ZMAP_{_time_labels}"
 
     # ------------------------------------------------------------------
+    # 4c. Store run config for zero-arg on-demand accessors
+    # ------------------------------------------------------------------
+    adata_query.uns.setdefault("zmap_labels", {})
+    adata_query.uns["zmap_labels"]["_last_space"] = space
+    adata_query.uns["zmap_labels"].setdefault(space, {})
+    adata_query.uns["zmap_labels"][space]["_run_config"] = {
+        "label_space": space,
+        "ref_label_col": ref_label_col,
+        "query_label_col": query_label_col,
+        "time_col": time_col_actual,
+        "output_dir": space_dir,
+    }
+    # Store reference UMAP for on-demand plot_embedding (avoids needing adata_ref)
+    if "X_umap" in adata_ref.obsm:
+        adata_query.uns["zmap_labels"][space]["_ref_umap"] = (
+            np.asarray(adata_ref.obsm["X_umap"]).copy()
+        )
+
+    # ------------------------------------------------------------------
     # 5. Run summary (key/value metadata table)
     # ------------------------------------------------------------------
     df_summary = summarize_knn_run(adata_query, space)
@@ -3411,7 +3446,7 @@ def annotate_with_zmap(
     df_cells = build_cell_annotations_table(
         adata_query,
         space,
-        cluster_col=cluster_col,
+        cluster_col=query_label_col,
         time_col=time_col_actual,
         save_csv=save_outputs,
         output_dir=space_dir,
@@ -3426,13 +3461,13 @@ def annotate_with_zmap(
     # ------------------------------------------------------------------
     # 7. Cluster-level consensus aggregation
     # ------------------------------------------------------------------
-    if cluster_col is not None:
+    if query_label_col is not None:
         if v >= 1:
-            print(f"[ZMAP] Aggregating cell annotations by cluster ('{cluster_col}')...")
+            print(f"[ZMAP] Aggregating cell annotations by cluster ('{query_label_col}')...")
         try:
             df_clusters = aggregate_by_cluster(
                 adata_query,
-                cluster_col=cluster_col,
+                cluster_col=query_label_col,
                 label_space=space,
                 save_csv=save_outputs,
                 output_dir=space_dir,
@@ -3517,19 +3552,19 @@ def annotate_with_zmap(
     # ------------------------------------------------------------------
     # 10. Label overlap heatmap (v >= 3)
     # ------------------------------------------------------------------
-    if cluster_col is not None:
+    if query_label_col is not None:
         show_heatmap = v >= 3
         if show_heatmap or save_outputs:
             try:
                 if v >= 1:
                     print(
                         f"[ZMAP] Computing label overlap: "
-                        f"'{cluster_col}' (rows) vs '{ref_label_col}' (columns)..."
+                        f"'{query_label_col}' (rows) vs '{ref_label_col}' (columns)..."
                     )
                 mapping_df = map_query_labels(
                     adata_query,
                     obs_A=ref_label_col+'_predicted',
-                    obs_B=cluster_col,
+                    obs_B=query_label_col,
                     normalize="row",
                     show_plot=show_heatmap,
                     return_df=True,
@@ -3579,7 +3614,7 @@ def annotate_with_zmap(
             print(f"[ZMAP]    Time range: {time_str}")
         print(f"[ZMAP]    Outputs: {space_dir}/")
         print(f"[ZMAP]    Access:  adata.uns['zmap_labels']['{space}']")
-        if cluster_col is not None:
+        if query_label_col is not None:
             print(f"[ZMAP]    Clusters: adata.uns['zmap_labels']['{space}']['Cluster Summary']")
         print(f"[ZMAP] ═══════════════════════════════════════════════════════")
     elif v >= 1:
@@ -3592,35 +3627,51 @@ def annotate_with_zmap(
 #  8. On-demand plot accessors
 # ================================================================
 
+def _resolve_config(
+    adata_query: ad.AnnData,
+    label_space: str | None,
+) -> tuple[str, dict]:
+    """Resolve label_space from _last_space if needed, return (space, config)."""
+    store = adata_query.uns.get("zmap_labels", {})
+    if label_space is None:
+        label_space = store.get("_last_space")
+        if label_space is None:
+            raise KeyError(
+                "No label_space provided and no '_last_space' found in "
+                "adata.uns['zmap_labels']. Run annotate_with_zmap first."
+            )
+    space_store = store.get(label_space, {})
+    config = space_store.get("_run_config", {})
+    return label_space, config
+
+
 def plot_qc(
     adata_query: ad.AnnData,
-    label_space: str = "ZMAP_CellType",
+    label_space: str | None = None,
     *,
     save: bool = False,
-    output_dir: str = "zmap_predict",
 ) -> None:
     """
     Re-plot the combined probability/distance QC histograms from a completed run.
 
-    Reads the ``_predicted_prob`` and ``_predicted_dist`` columns from
-    ``adata_query.obs``. No recomputation is needed.
+    All parameters are resolved automatically from the stored run config.
+    Just call ``zmap.predict.plot_qc(adata)``.
 
     Parameters
     ----------
     adata_query : anndata.AnnData
-        Annotated query dataset.
-    label_space : str, default ``"ZMAP_CellType"``
-        Label namespace used during prediction.
+        Annotated query dataset (must have been processed by ``annotate_with_zmap``).
+    label_space : str or None, default ``None``
+        Label namespace. When ``None``, uses the most recent run.
     save : bool, default ``False``
-        Save the figure to ``{output_dir}/{label_space}/``.
-    output_dir : str, default ``"zmap_predict"``
-        Base output directory.
+        Save the figure to the run's output directory.
     """
+    label_space, config = _resolve_config(adata_query, label_space)
     labels_base = f"{label_space}_predicted"
     col_prob = f"{labels_base}_prob"
     col_dist = f"{labels_base}_dist"
 
-    for col, name in [(col_prob, "probability"), (col_dist, "distance")]:
+    for col in (col_prob, col_dist):
         if col not in adata_query.obs.columns:
             raise KeyError(
                 f"Column '{col}' not found in adata_query.obs. "
@@ -3642,7 +3693,7 @@ def plot_qc(
     fig.tight_layout()
 
     if save:
-        space_dir = os.path.join(output_dir, label_space)
+        space_dir = config.get("output_dir", os.path.join("zmap_predict", label_space))
         os.makedirs(space_dir, exist_ok=True)
         qc_path = os.path.join(space_dir, f"{labels_base}_qc_summary.png")
         fig.savefig(qc_path, dpi=300, bbox_inches="tight")
@@ -3651,13 +3702,68 @@ def plot_qc(
     plt.show()
 
 
+def plot_embedding(
+    adata_query: ad.AnnData,
+    label_space: str | None = None,
+    *,
+    save: bool = False,
+    **kwargs,
+) -> None:
+    """
+    Re-plot the UMAP overlay with on-data labels and time strip.
+
+    Reproduces the UMAP figure from the pipeline using the stored reference
+    UMAP coordinates and run config. No ``adata_ref`` needed.
+
+    Parameters
+    ----------
+    adata_query : anndata.AnnData
+        Annotated query dataset (must have been processed by ``annotate_with_zmap``).
+    label_space : str or None, default ``None``
+        Label namespace. When ``None``, uses the most recent run.
+    save : bool, default ``False``
+        Save the figure to the run's output directory.
+    **kwargs
+        Extra keyword arguments forwarded to ``plot_embedding_with_ondata_labels``.
+    """
+    label_space, config = _resolve_config(adata_query, label_space)
+    space_store = adata_query.uns.get("zmap_labels", {}).get(label_space, {})
+
+    ref_umap = space_store.get("_ref_umap")
+    if ref_umap is None:
+        raise KeyError(
+            f"No stored reference UMAP found at "
+            f"adata.uns['zmap_labels']['{label_space}']['_ref_umap']. "
+            "Run annotate_with_zmap first."
+        )
+
+    # Build a minimal AnnData shell with just the reference UMAP
+    adata_ref_mini = ad.AnnData(
+        obs=pd.DataFrame(index=[f"ref_{i}" for i in range(ref_umap.shape[0])]),
+    )
+    adata_ref_mini.obsm["X_umap"] = ref_umap
+
+    color_key = f"{label_space}_predicted"
+    time_key = config.get("time_col", "ZMAP_time_id_predicted")
+    space_dir = config.get("output_dir", os.path.join("zmap_predict", label_space))
+
+    plot_embedding_with_ondata_labels(
+        adata_ref_mini,
+        adata_query,
+        color_key=color_key,
+        time_key=time_key,
+        show=True,
+        save=save,
+        output_dir=space_dir,
+        **kwargs,
+    )
+
+
 def plot_time(
     adata_query: ad.AnnData,
-    label_space: str = "ZMAP_CellType",
+    label_space: str | None = None,
     *,
-    time_col: str | None = None,
     save: bool = False,
-    output_dir: str = "zmap_predict",
     **kwargs,
 ) -> None:
     """
@@ -3666,20 +3772,16 @@ def plot_time(
     Parameters
     ----------
     adata_query : anndata.AnnData
-        Annotated query dataset.
-    label_space : str, default ``"ZMAP_CellType"``
-        Label namespace (used only for filename when saving).
-    time_col : str or None, default ``None``
-        Time column to plot. When ``None``, uses ``"ZMAP_time_id_predicted"``.
+        Annotated query dataset (must have been processed by ``annotate_with_zmap``).
+    label_space : str or None, default ``None``
+        Label namespace. When ``None``, uses the most recent run.
     save : bool, default ``False``
-        Save the figure to ``{output_dir}/{label_space}/``.
-    output_dir : str, default ``"zmap_predict"``
-        Base output directory.
+        Save the figure to the run's output directory.
     **kwargs
         Extra keyword arguments forwarded to ``plot_colorbar_histogram``.
     """
-    if time_col is None:
-        time_col = "ZMAP_time_id_predicted"
+    label_space, config = _resolve_config(adata_query, label_space)
+    time_col = config.get("time_col", "ZMAP_time_id_predicted")
 
     if time_col not in adata_query.obs.columns:
         raise KeyError(
@@ -3695,7 +3797,7 @@ def plot_time(
     )
 
     if save:
-        space_dir = os.path.join(output_dir, label_space)
+        space_dir = config.get("output_dir", os.path.join("zmap_predict", label_space))
         os.makedirs(space_dir, exist_ok=True)
         path = os.path.join(space_dir, f"{label_space}_time_distribution.png")
         fig.savefig(path, dpi=300, bbox_inches="tight")
@@ -3704,45 +3806,49 @@ def plot_time(
     plt.show()
 
 
-def plot_heatmap(
+def plot_overlap_matrix(
     adata_query: ad.AnnData,
-    cluster_col: str,
-    label_space: str = "ZMAP_CellType",
+    label_space: str | None = None,
     *,
     save: bool = False,
-    output_dir: str = "zmap_predict",
     **kwargs,
 ) -> pd.DataFrame | None:
     """
-    Re-plot the cluster × ZMAP label overlap heatmap.
+    Re-plot the query_label_col × ZMAP label overlap matrix.
 
     Parameters
     ----------
     adata_query : anndata.AnnData
-        Annotated query dataset.
-    cluster_col : str
-        Cluster column in ``adata_query.obs`` (e.g. ``"leiden"``).
-    label_space : str, default ``"ZMAP_CellType"``
-        Label namespace used during prediction.
+        Annotated query dataset (must have been processed by ``annotate_with_zmap``).
+    label_space : str or None, default ``None``
+        Label namespace. When ``None``, uses the most recent run.
     save : bool, default ``False``
-        Save the figure to ``{output_dir}/{label_space}/``.
-    output_dir : str, default ``"zmap_predict"``
-        Base output directory.
+        Save the figure to the run's output directory.
     **kwargs
         Extra keyword arguments forwarded to ``map_query_labels``.
 
     Returns
     -------
     pd.DataFrame
-        Per-cluster best-match mapping table.
+        Per-group best-match mapping table.
     """
+    label_space, config = _resolve_config(adata_query, label_space)
+
+    query_label_col = config.get("query_label_col")
+    if query_label_col is None:
+        raise ValueError(
+            "No query_label_col was set during the pipeline run. "
+            "Re-run annotate_with_zmap with query_label_col='...' to enable "
+            "the overlap matrix."
+        )
+
     obs_A = f"{label_space}_predicted"
-    space_dir = os.path.join(output_dir, label_space)
+    space_dir = config.get("output_dir", os.path.join("zmap_predict", label_space))
 
     return map_query_labels(
         adata_query,
         obs_A=obs_A,
-        obs_B=cluster_col,
+        obs_B=query_label_col,
         normalize="row",
         show_plot=True,
         return_df=True,
@@ -3756,7 +3862,7 @@ def plot_heatmap(
 
 def show_summary(
     adata_query: ad.AnnData,
-    label_space: str = "ZMAP_CellType",
+    label_space: str | None = None,
 ) -> None:
     """
     Re-display the run summary and annotation tables from a completed run.
@@ -3764,10 +3870,11 @@ def show_summary(
     Parameters
     ----------
     adata_query : anndata.AnnData
-        Annotated query dataset.
-    label_space : str, default ``"ZMAP_CellType"``
-        Label namespace used during prediction.
+        Annotated query dataset (must have been processed by ``annotate_with_zmap``).
+    label_space : str or None, default ``None``
+        Label namespace. When ``None``, uses the most recent run.
     """
+    label_space, config = _resolve_config(adata_query, label_space)
     store = adata_query.uns.get("zmap_labels", {}).get(label_space, {})
     if not store:
         raise KeyError(

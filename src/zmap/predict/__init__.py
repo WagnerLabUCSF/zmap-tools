@@ -7,9 +7,9 @@ Provides the end-to-end ``annotate_with_zmap`` pipeline as well as
 lower-level functions for preprocessing, kNN-based label transfer,
 cluster aggregation, and UMAP overlay plotting.
 
-On-demand plot accessors (``plot_qc``, ``plot_time``, ``plot_heatmap``,
-``show_summary``) let you re-display results from a completed run
-without recomputing.
+On-demand plot accessors (``plot_qc``, ``plot_embedding``, ``plot_time``,
+``plot_overlap_matrix``, ``show_summary``) let you re-display results from a
+completed run without recomputing.
 """
 
 from .predict import (
@@ -26,8 +26,9 @@ from .predict import (
     annotate_with_zmap,
     # On-demand accessors
     plot_qc,
+    plot_embedding,
     plot_time,
-    plot_heatmap,
+    plot_overlap_matrix,
     show_summary,
 )
 
@@ -45,7 +46,8 @@ __all__ = [
     "annotate_with_zmap",
     # On-demand accessors
     "plot_qc",
+    "plot_embedding",
     "plot_time",
-    "plot_heatmap",
+    "plot_overlap_matrix",
     "show_summary",
 ]
