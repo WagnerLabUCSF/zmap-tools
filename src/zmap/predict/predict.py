@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-import warnings, os
+import warnings, os, time
 
 import numpy as np
 import pandas as pd
@@ -32,6 +32,14 @@ from sklearn.metrics import (
 
 from sklearn.preprocessing import label_binarize
 from .knn_backend import knn_search
+
+
+# ---- Colormap routing: ref_label_col → reference uns key ----
+_COLORMAP_UNS_KEY = {
+    "ZMAP_CellType":  "ZMAP_colormap_C79",
+    "ZMAP_Tissue":    "ZMAP_colormap_T28",
+    "ZMAP_GermLayer": "ZMAP_colormap_G7",
+}
 
 
 # ================================================================
@@ -668,6 +676,7 @@ def predict_labels_kNN(
     plot_eval_curves: bool = False,
     plot_mapping_qc: bool = True,
     save_mapping_qc: bool = True,
+    show_qc_plots: bool = True,
 
     # QC thresholds
     p_thresh: float | None = 0.8,
@@ -756,6 +765,9 @@ def predict_labels_kNN(
         Plot per-cell confidence and distance QC distributions after prediction.
     save_mapping_qc : bool, default ``True``
         Save QC plots to ``./zmap/predict/``.
+    show_qc_plots : bool, default ``True``
+        Call ``plt.show()`` for QC plots. Set to ``False`` when display is
+        managed by a higher-level wrapper (e.g. ``annotate_with_zmap``).
     p_thresh : float or None, default ``0.8``
         Minimum vote probability required to assign a label. Cells below this
         threshold are marked as unassigned.
@@ -776,7 +788,7 @@ def predict_labels_kNN(
 
         - ``adata_query.obs[f"{label_space}_predicted"]`` — predicted labels.
         - ``adata_query.obs[f"{label_space}_prob"]``      — top-label vote probability.
-        - ``adata_query.obs["ZMAP_time_id"]``             — predicted developmental time.
+        - ``adata_query.obs["ZMAP_time_id_predicted"]``  — predicted developmental time.
         - ``adata_query.uns['zmap_labels'][label_space]`` — full run metadata.
     """
 
@@ -1181,7 +1193,10 @@ def predict_labels_kNN(
                 fig1.savefig(prob_path, dpi=300)
                 print(f"[ZMAP] Saved QC plot: {prob_path}")
 
-            plt.show()
+            if show_qc_plots:
+                plt.show()
+            else:
+                plt.close(fig1)
 
             # ----- Distance histogram -----
             fig2 = plt.figure()
@@ -1205,7 +1220,10 @@ def predict_labels_kNN(
                 fig2.savefig(dist_path, dpi=300)
                 print(f"[ZMAP] Saved QC plot: {dist_path}")
 
-            plt.show()
+            if show_qc_plots:
+                plt.show()
+            else:
+                plt.close(fig2)
 
 
     # ---------- rare label filter ----------
@@ -1478,6 +1496,7 @@ def predict_labels_tissue_kNN(
     plot_eval_curves: bool = False,
     plot_mapping_qc: bool = True,
     save_mapping_qc: bool = True,
+    show_qc_plots: bool = True,
     p_thresh: float | None = 0.8,
     d_thresh: float | None = 0.1,
     min_cells_per_label: int = 15,
@@ -1609,6 +1628,7 @@ def predict_labels_tissue_kNN(
             plot_eval_curves=plot_eval_curves,
             plot_mapping_qc=plot_mapping_qc,
             save_mapping_qc=save_mapping_qc,
+            show_qc_plots=show_qc_plots,
             p_thresh=p_thresh_use,
             d_thresh=d_thresh,
             min_cells_per_label=min_cells_per_label,
@@ -1817,6 +1837,7 @@ def predict_labels_tissue_kNN(
         plot_eval_curves=plot_eval_curves,
         plot_mapping_qc=plot_mapping_qc,
         save_mapping_qc=save_mapping_qc,
+        show_qc_plots=show_qc_plots,
         p_thresh=p_thresh_use,
         d_thresh=d_thresh,
         min_cells_per_label=min_cells_per_label,
@@ -2129,6 +2150,7 @@ def build_cell_annotations_table(
     label_space: str,
     *,
     cluster_col: str | None = None,
+    time_col: str = "ZMAP_time_id_predicted",
     save_csv: bool = True,
     output_dir: str = "zmap_predict",
 ) -> pd.DataFrame:
@@ -2150,9 +2172,13 @@ def build_cell_annotations_table(
     cluster_col : str or None, default ``None``
         If provided, include this column (e.g. ``"leiden"``) as the first
         data column so that cells can be linked back to user-defined clusters.
+    time_col : str, default ``"ZMAP_time_id_predicted"``
+        Column in ``adata_query.obs`` containing predicted developmental time.
+        Must match the column written by ``predict_labels_kNN`` (which depends
+        on ``time_labels`` and ``label_suffix``).
     save_csv : bool, default ``True``
         Write the table to
-        ``./zmap/predict/{label_space}_cell_annotations.csv``.
+        ``{output_dir}/{label_space}_cell_annotations.csv``.
 
     Returns
     -------
@@ -2165,14 +2191,13 @@ def build_cell_annotations_table(
         - ``{label_space}_prob``        — kNN vote probability (0–1).
         - ``{label_space}_reject_flag`` — ``True`` if cell failed QC.
         - ``{label_space}_reason``      — which filter triggered rejection.
-        - ``ZMAP_time_id``              — predicted developmental time (hpf).
+        - ``{time_col}``                — predicted developmental time (hpf).
     """
     labels_base = f"{label_space}_predicted"
     col_main   = labels_base
     col_prob   = f"{labels_base}_prob"
     col_reject = f"{labels_base}_reject_flag"
     col_reason = f"{labels_base}_reason"
-    time_col   = "ZMAP_time_id"
 
     wanted: list[str] = []
     if cluster_col and cluster_col in adata_query.obs.columns:
@@ -2577,25 +2602,43 @@ def plot_embedding_with_ondata_labels(
     try:
         # ensure reference has its color map
         sync_zmap_colors(adata_ref, obs_key=base_obs)
-        # sync query colors from reference
-        sync_zmap_colors(adata_test_plot, obs_key=base_obs, ref_adata=adata_ref)
-    except Exception:
-        # silently fall back to whatever is already in adata_test_plot.uns
-        pass
+        # sync query colors from reference — use color_key (the _predicted col
+        # that actually exists in query .obs), look up ref palette via base_obs
+        sync_zmap_colors(adata_test_plot, obs_key=color_key, ref_adata=adata_ref, ref_obs_key=base_obs)
+    except Exception as e:
+        warnings.warn(
+            f"[ZMAP] sync_zmap_colors failed for '{color_key}': {e}. "
+            "Falling back to _color_map dict or positional palette.",
+            stacklevel=2,
+        )
 
     # ---- palette construction ----
     if palette is None:
-        if palette_uns_key is None:
-            # e.g. color_key="ZMAP_Tissue_predicted" → use "ZMAP_Tissue_colors"
-            palette_uns_key = f"{base_obs}_colors"
-        if palette_uns_key not in adata_test_plot.uns:
-            raise KeyError(
-                f"Palette not provided and '{palette_uns_key}' not found in adata.uns. "
-                f"Provide `palette` or ensure `{palette_uns_key}` exists."
-            )
         cats = adata_test_plot.obs[color_key].cat.categories
-        colors = adata_test_plot.uns[palette_uns_key]
-        palette = dict(zip(cats, colors))
+
+        # Preferred: use _color_map dict (order-independent, set by annotate_with_zmap)
+        cmap_dict_key = f"{base_obs}_color_map"
+        if cmap_dict_key in adata_test_plot.uns:
+            color_map = adata_test_plot.uns[cmap_dict_key]
+            palette = {c: color_map.get(c, "#BDBDBD") for c in cats}
+        else:
+            # Legacy fallback: positional _colors array
+            if palette_uns_key is None:
+                palette_uns_key = f"{base_obs}_colors"
+            if palette_uns_key not in adata_test_plot.uns:
+                raise KeyError(
+                    f"Palette not provided and neither '{cmap_dict_key}' nor "
+                    f"'{palette_uns_key}' found in adata.uns. "
+                    f"Provide `palette` or ensure a color map exists."
+                )
+            colors = adata_test_plot.uns[palette_uns_key]
+            palette = dict(zip(cats, colors))
+            warnings.warn(
+                f"[ZMAP] Using positional _colors array for '{base_obs}'; "
+                "results may be wrong if query categories differ from reference order. "
+                "Consider storing a _color_map dict.",
+                stacklevel=2,
+            )
 
     # ---- defaults for arrowprops ----
     if arrowprops is None:
@@ -3109,7 +3152,7 @@ def annotate_with_zmap(
         or script contexts (figures are still saved when ``save_outputs=True``).
     save_outputs : bool, default ``True``
         Save cell annotations CSV, cluster summary CSV, and all figures
-        to ``./zmap/predict/``.
+        to ``zmap_predict/``.
 
     Returns
     -------
@@ -3119,7 +3162,7 @@ def annotate_with_zmap(
 
         - ``.obs[f"{label_space}_predicted"]``                       — transferred cell labels.
         - ``.obs[f"{label_space}_prob"]``                            — label confidence (0–1).
-        - ``.obs["ZMAP_time_id"]``                                   — predicted time (hpf).
+        - ``.obs["ZMAP_time_id_predicted"]``                         — predicted time (hpf).
         - ``.obsm["X_umap"]``                                        — UMAP coordinates (if ingested).
         - ``.uns['zmap_labels'][label_space]['Run Summary Simple']`` — key/value run summary.
         - ``.uns['zmap_labels'][label_space]['Cell Annotations']``   — per-cell table.
@@ -3236,10 +3279,13 @@ def annotate_with_zmap(
     pk.setdefault("metric", "cosine")
     pk.setdefault("label_suffix", "predicted")   # ensures obs columns are always {space}_predicted
     pk.setdefault("output_dir", output_dir)
+    # Let annotate_with_zmap control QC display — suppress inside predict_labels_kNN
+    pk.setdefault("show_qc_plots", show_plots)
     use_tissue_aware_knn = bool(
         pk.pop("use_tissue_aware_knn", False) or pk.pop("use_tissue_aware", False)
     )
 
+    t0 = time.time()
     if use_tissue_aware_knn:
         print("[ZMAP] Using tissue-aware kNN transfer...")
         predict_labels_tissue_kNN(
@@ -3259,7 +3305,17 @@ def annotate_with_zmap(
             query_truth_col=query_truth_col,
             **pk,
         )
-    print("[ZMAP] Label transfer finished.")
+    print(f"[ZMAP] Label transfer finished ({time.time() - t0:.0f}s).")
+
+    # ------------------------------------------------------------------
+    # 4b. Resolve actual time column name (matches predict_labels_kNN logic)
+    # ------------------------------------------------------------------
+    _label_suffix = pk.get("label_suffix", "predicted") or ""
+    _time_labels = pk.get("time_labels", "time_id")
+    if _label_suffix:
+        time_col_actual = f"ZMAP_{_time_labels}_{_label_suffix}"
+    else:
+        time_col_actual = f"ZMAP_{_time_labels}"
 
     # ------------------------------------------------------------------
     # 5. Run summary (key/value metadata table)
@@ -3285,6 +3341,7 @@ def annotate_with_zmap(
         adata_query,
         space,
         cluster_col=cluster_col,
+        time_col=time_col_actual,
         save_csv=save_outputs,
         output_dir=output_dir,
     )
@@ -3329,30 +3386,50 @@ def annotate_with_zmap(
 
             print("[ZMAP] Cluster aggregation complete.")
         except Exception as e:
-            print(f"[ZMAP] Warning: cluster aggregation failed: {e}")
+            warnings.warn(f"[ZMAP] Cluster aggregation failed: {e}", stacklevel=2)
 
     # ------------------------------------------------------------------
-    # 8. UMAP overlay figure
+    # 8. Copy colormap dict from reference → query (order-independent)
     # ------------------------------------------------------------------
-    adata_query.uns['ZMAP_CellType_colors'] = adata_ref.uns['ZMAP_CellType_colors'].copy()
-    adata_query.uns['ZMAP_Tissue_colors']   = adata_ref.uns['ZMAP_Tissue_colors'].copy()
-    adata_query.uns['ZMAP_GermLayer_colors'] = adata_ref.uns['ZMAP_GermLayer_colors'].copy()
+    cmap_src_key = _COLORMAP_UNS_KEY.get(ref_label_col)
+    if cmap_src_key and cmap_src_key in adata_ref.uns:
+        cmap_dict = dict(adata_ref.uns[cmap_src_key])
+        # Store under both base name and _predicted name so downstream
+        # palette lookups find it regardless of which key they strip to.
+        adata_query.uns[f"{ref_label_col}_color_map"] = cmap_dict
+        adata_query.uns[f"{ref_label_col}_predicted_color_map"] = cmap_dict
+    else:
+        # Fallback: copy positional _colors arrays (legacy path)
+        for key in ("ZMAP_CellType_colors", "ZMAP_Tissue_colors", "ZMAP_GermLayer_colors"):
+            if key in adata_ref.uns:
+                adata_query.uns[key] = adata_ref.uns[key].copy()
+        warnings.warn(
+            f"[ZMAP] No _color_map dict found for ref_label_col='{ref_label_col}' "
+            f"(looked for uns['{cmap_src_key}']). Falling back to positional _colors "
+            "arrays — palette may be incorrect if query categories differ from reference.",
+            stacklevel=2,
+        )
+
+    # ------------------------------------------------------------------
+    # 9. UMAP overlay figure
+    # ------------------------------------------------------------------
     try:
         print("[ZMAP] Plotting UMAP overlay with predicted labels...")
         plot_embedding_with_ondata_labels(
             adata_ref,
             adata_query,
             color_key=f"{space}_predicted",
+            time_key=time_col_actual,
             show=show_plots,
             save=save_outputs,
             output_dir=output_dir,
         )
         print("[ZMAP] UMAP overlay figure saved.")
     except Exception as e:
-        print(f"[ZMAP] Warning: failed to generate UMAP overlay figure: {e}")
+        warnings.warn(f"[ZMAP] Failed to generate UMAP overlay figure: {e}", stacklevel=2)
 
     # ------------------------------------------------------------------
-    # 9. Label overlap heatmap (cluster × ZMAP label)
+    # 10. Label overlap heatmap (cluster × ZMAP label)
     # ------------------------------------------------------------------
     if cluster_col is not None:
         try:
@@ -3375,7 +3452,7 @@ def annotate_with_zmap(
             adata_query.uns["zmap_labels"][space]["Label Mapping"] = mapping_df
             print("[ZMAP] Label overlap mapping complete.")
         except Exception as e:
-            print(f"[ZMAP] Warning: failed to compute label mapping: {e}")
+            warnings.warn(f"[ZMAP] Failed to compute label mapping: {e}", stacklevel=2)
 
     print(f"\n[ZMAP] ✓ Annotation complete. Results stored under namespace '{space}'.")
     print(f"[ZMAP]   Access summary:  adata.uns['zmap_labels']['{space}']")
