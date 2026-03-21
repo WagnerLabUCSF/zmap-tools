@@ -1010,7 +1010,7 @@ def predict_labels_kNN(
             reuse_neighbors = True
 
     if not reuse_neighbors:
-        _zlog("Computing new kNN graph on filtered reference...")
+        _zlog("Computing kNN graph...")
         neighbor_indices, distances, knn_meta = knn_search(
             X_ref,
             adata_query.obsm[query_basis],
@@ -3811,7 +3811,7 @@ def validate_markers(
     groupby: str,
     *,
     ref_label_col: str = "ZMAP_CellType",
-    n_query_markers: int = 20,
+    n_query_markers: int = 100,
     n_ref_markers: int = 100,
     max_cells_per_group: int = 2000,
     method: str = "wilcoxon",
@@ -3844,7 +3844,7 @@ def validate_markers(
     ref_label_col : str, default ``"ZMAP_CellType"``
         Reference label column, used to determine which ZMAP marker ledger
         to load (e.g. ``"ZMAP_CellType"`` → ``"CellType"`` level).
-    n_query_markers : int, default ``20``
+    n_query_markers : int, default ``100``
         Number of top DE genes to consider per group.
     n_ref_markers : int, default ``100``
         Number of top reference markers to load per group from the ZMAP
@@ -3992,8 +3992,8 @@ def validate_markers(
 
 
 def plot_marker_comparison(
-    df_a: pd.DataFrame,
-    df_b: pd.DataFrame,
+    df_a: pd.DataFrame, # Predicted
+    df_b: pd.DataFrame, # Truth
     *,
     label_a: str = "Predicted",
     label_b: str = "Ground truth",
@@ -4088,8 +4088,8 @@ def plot_marker_comparison(
     # Mean lines
     mean_a = merged["pct_a"].mean()
     mean_b = merged["pct_b"].mean()
-    ax.axvline(mean_a, color="steelblue", linestyle="--", linewidth=0.8, alpha=0.6)
-    ax.axvline(mean_b, color="coral", linestyle="--", linewidth=0.8, alpha=0.6)
+    ax.axvline(mean_a, color="#1f77b4", linestyle="--", linewidth=0.8, alpha=0.6)
+    ax.axvline(mean_b, color="#ff7f0e", linestyle="--", linewidth=0.8, alpha=0.6)
 
     fig.tight_layout()
 
