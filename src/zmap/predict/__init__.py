@@ -30,6 +30,7 @@ from .predict import (
     plot_time,
     plot_overlap_matrix,
     show_summary,
+    validate_markers,
 )
 
 __all__ = [
@@ -50,4 +51,5 @@ __all__ = [
     "plot_time",
     "plot_overlap_matrix",
     "show_summary",
+    "validate_markers",
 ]

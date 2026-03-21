@@ -75,6 +75,13 @@ _COLORMAP_UNS_KEY = {
     "ZMAP_GermLayer": "ZMAP_colormap_G7",
 }
 
+# ---- Marker level routing: ref_label_col → load_consensus_markers level ----
+_MARKER_LEVEL_KEY = {
+    "ZMAP_CellType":  "CellType",
+    "ZMAP_Tissue":    "Tissue",
+    "ZMAP_GermLayer": "GermLayer",
+}
+
 
 # ================================================================
 #  0. Preprocessing & Helpter Functions
@@ -3174,7 +3181,8 @@ def annotate_with_zmap(
     do_ingest: bool = True,
     tissue_aware: bool = False,       # use tissue-aware kNN transfer
     evaluate: bool = False,           # compute accuracy metrics against query_truth_col
-    n_neighbors: int = 50,            # number of neighbors for kNN voting
+    n_neighbors: int = 25,            # number of neighbors for kNN voting
+    marker_validation: bool = True,   # validate predicted labels against ZMAP marker ledger
 
     # --- kwargs passthroughs to lower-level steps ---
     preprocess_kwargs: Mapping[str, Any] | None = None,
@@ -3264,6 +3272,12 @@ def annotate_with_zmap(
         distance weighting (the default), 25 is robust — distant neighbors
         are downweighted automatically, so the effective neighborhood adapts
         to local density.
+    marker_validation : bool, default ``True``
+        Validate predicted labels by comparing DE markers against the ZMAP
+        consensus marker ledger. Discovers the top 20 DE genes per predicted
+        group and measures overlap with the top 100 reference markers.
+        Results are stored in
+        ``adata_query.uns['zmap_labels'][label_space]['Marker Validation']``.
     preprocess_kwargs : dict or None, default ``None``
         Extra keyword arguments forwarded to ``preprocess_adata_query``
         (e.g. ``{"strict_counts": True}``).
@@ -3311,6 +3325,8 @@ def annotate_with_zmap(
           (only when ``query_label_col`` is provided).
         - ``.uns['zmap_labels'][label_space]['Label Mapping']``      — label overlap matrix
           (only when ``query_label_col`` is provided).
+        - ``.uns['zmap_labels'][label_space]['Marker Validation']`` — DE marker overlap with
+          ZMAP reference ledger (only when ``marker_validation=True``).
 
     Examples
     --------
@@ -3707,7 +3723,40 @@ def annotate_with_zmap(
                 warnings.warn(f"[ZMAP] Failed to compute label mapping: {e}", stacklevel=2)
 
     # ------------------------------------------------------------------
-    # 11. Final compact summary (v >= 2)
+    # 11. Marker validation (DE overlap with ZMAP reference ledger)
+    # ------------------------------------------------------------------
+    if marker_validation:
+        try:
+            if v >= 1:
+                _zlog("Validating predicted labels against ZMAP marker ledger...")
+            df_markers = validate_markers(
+                adata_query,
+                groupby=f"{space}_predicted",
+                ref_label_col=ref_label_col,
+                save_csv=save_outputs,
+                output_dir=space_dir,
+            )
+            adata_query.uns["zmap_labels"][space]["Marker Validation"] = df_markers
+
+            if v >= 2:
+                mean_overlap = df_markers["pct_overlap"].mean()
+                n_groups = len(df_markers)
+                n_with_overlap = int((df_markers["n_overlap"] > 0).sum())
+                _zlog(
+                    f"Marker validation: {n_with_overlap}/{n_groups} groups have reference overlap, "
+                    f"mean {mean_overlap:.1f}% (top-20 DE vs top-100 ref)"
+                )
+            if v >= 3:
+                _display_df(df_markers, max_rows=20)
+            if v >= 1:
+                _zlog("Marker validation complete.")
+        except Exception as e:
+            if debug:
+                raise
+            warnings.warn(f"[ZMAP] Marker validation failed: {e}", stacklevel=2)
+
+    # ------------------------------------------------------------------
+    # 12. Final compact summary (v >= 2)
     # ------------------------------------------------------------------
     if v >= 2:
         labels_base = f"{space}_predicted"
@@ -3737,6 +3786,11 @@ def annotate_with_zmap(
             _zlog(f"   Top labels: {top_labels_str}")
         if time_str:
             _zlog(f"   Time range: {time_str}")
+        # Marker validation summary
+        marker_store = adata_query.uns.get("zmap_labels", {}).get(space, {}).get("Marker Validation")
+        if marker_store is not None and len(marker_store) > 0:
+            mean_ov = marker_store["pct_overlap"].mean()
+            _zlog(f"   Marker overlap: {mean_ov:.1f}% mean (top-20 DE vs top-100 ref)")
         _zlog(f"   Outputs: {space_dir}/")
         _zlog(f"   Access:  adata.uns['zmap_labels']['{space}']")
         if query_label_col is not None:
@@ -3746,6 +3800,188 @@ def annotate_with_zmap(
         _zlog(f"✓ Annotation complete. Results in '{space_dir}/'.")
 
     return adata_query
+
+
+# ================================================================
+#  7b. Marker validation
+# ================================================================
+
+def validate_markers(
+    adata_query: ad.AnnData,
+    groupby: str,
+    *,
+    ref_label_col: str = "ZMAP_CellType",
+    n_query_markers: int = 20,
+    n_ref_markers: int = 100,
+    max_cells_per_group: int = 2000,
+    method: str = "wilcoxon",
+    corr_method: str = "benjamini-hochberg",
+    min_log2fc: float = 1.0,
+    max_qval: float = 0.05,
+    save_csv: bool = False,
+    output_dir: str | None = None,
+) -> pd.DataFrame:
+    """
+    Validate predicted annotations by comparing DE markers to the ZMAP reference ledger.
+
+    For each group in ``groupby``, discovers the top DE markers via
+    ``sc.tl.rank_genes_groups``, then measures overlap with the ZMAP
+    consensus marker genes for the corresponding cell type. High overlap
+    indicates that the transferred labels are producing biologically
+    coherent groups.
+
+    Can be called with any ``groupby`` column — use with predicted labels
+    to validate the pipeline, or with ground-truth labels to compare
+    annotation quality.
+
+    Parameters
+    ----------
+    adata_query : anndata.AnnData
+        Annotated query dataset with log-normalized values in ``.X``.
+    groupby : str
+        Column in ``adata_query.obs`` to group cells by for DE testing.
+        Typically ``f"{label_space}_predicted"`` or a ground-truth column.
+    ref_label_col : str, default ``"ZMAP_CellType"``
+        Reference label column, used to determine which ZMAP marker ledger
+        to load (e.g. ``"ZMAP_CellType"`` → ``"CellType"`` level).
+    n_query_markers : int, default ``20``
+        Number of top DE genes to consider per group.
+    n_ref_markers : int, default ``100``
+        Number of top reference markers to load per group from the ZMAP
+        consensus ledger.
+    max_cells_per_group : int, default ``2000``
+        Maximum cells per group for DE testing. Groups exceeding this are
+        randomly subsampled for speed.
+    method : str, default ``"wilcoxon"``
+        Statistical test for ``sc.tl.rank_genes_groups``.
+    corr_method : str, default ``"benjamini-hochberg"``
+        Multiple testing correction method.
+    min_log2fc : float, default ``1.0``
+        Minimum log2 fold-change to consider a gene a valid DE marker.
+    max_qval : float, default ``0.05``
+        Maximum adjusted p-value to consider a gene significant.
+    save_csv : bool, default ``False``
+        Save the results DataFrame to ``{output_dir}/``.
+    output_dir : str or None, default ``None``
+        Output directory for saved CSV. Required when ``save_csv=True``.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per group with columns:
+
+        - ``group``              — group label.
+        - ``n_cells``            — number of cells in group.
+        - ``n_de_genes``         — DE genes passing filters (up to ``n_query_markers``).
+        - ``n_ref_markers``      — reference markers available for this group.
+        - ``n_overlap``          — genes in both query DE and reference sets.
+        - ``pct_overlap``        — ``n_overlap / n_de_genes * 100``.
+        - ``overlapping_genes``  — comma-separated list of overlapping gene names.
+
+    Examples
+    --------
+    Validate predicted labels (called automatically by the pipeline):
+
+    >>> df = zmap.predict.validate_markers(adata, groupby="ZMAP_CellType_predicted")
+
+    Compare predicted vs manual labels for a paper figure:
+
+    >>> df_pred  = zmap.predict.validate_markers(adata, groupby="ZMAP_CellType_predicted")
+    >>> df_truth = zmap.predict.validate_markers(adata, groupby="manual_annotation")
+    """
+    from zmap.reference.markers import load_consensus_markers
+
+    # ---- Resolve marker level from ref_label_col ----
+    marker_level = _MARKER_LEVEL_KEY.get(ref_label_col)
+    if marker_level is None:
+        # Try stripping "ZMAP_" prefix as fallback
+        marker_level = ref_label_col.replace("ZMAP_", "")
+    _zlog(f"Loading ZMAP reference markers (level={marker_level!r}, top {n_ref_markers})...")
+    ref_markers = load_consensus_markers(
+        level=marker_level,
+        n_per_group=n_ref_markers,
+        format="sets",
+    )
+    _zlog(f"Loaded markers for {len(ref_markers)} groups.")
+
+    # ---- Validate groupby column ----
+    if groupby not in adata_query.obs.columns:
+        raise KeyError(f"groupby column '{groupby}' not found in adata_query.obs.")
+
+    # ---- Subsample large groups for speed ----
+    obs_col = adata_query.obs[groupby].dropna()
+    groups = obs_col.unique()
+
+    if max_cells_per_group is not None:
+        group_counts = obs_col.value_counts()
+        oversized = group_counts[group_counts > max_cells_per_group].index
+        if len(oversized) > 0:
+            keep_idx = []
+            for g in groups:
+                g_idx = obs_col[obs_col == g].index
+                if g in oversized:
+                    rng = np.random.default_rng(42)
+                    g_idx = rng.choice(g_idx, size=max_cells_per_group, replace=False)
+                keep_idx.extend(g_idx)
+            adata_sub = adata_query[keep_idx].copy()
+            _zlog(f"Subsampled {len(oversized)} large groups to {max_cells_per_group} cells each.")
+        else:
+            adata_sub = adata_query[obs_col.index].copy()
+    else:
+        adata_sub = adata_query[obs_col.index].copy()
+
+    # ---- Run DE ----
+    _zlog(f"Running {method} DE test on {len(groups)} groups...")
+    sc.tl.rank_genes_groups(
+        adata_sub,
+        groupby=groupby,
+        method=method,
+        corr_method=corr_method,
+    )
+
+    # ---- Extract and filter DE results per group ----
+    records = []
+    for g in sorted(groups, key=str):
+        try:
+            df_de = sc.get.rank_genes_groups_df(adata_sub, group=str(g))
+        except Exception:
+            continue
+
+        # Filter by significance and fold-change
+        if "logfoldchanges" in df_de.columns:
+            df_de = df_de[df_de["logfoldchanges"] >= min_log2fc]
+        if "pvals_adj" in df_de.columns:
+            df_de = df_de[df_de["pvals_adj"] <= max_qval]
+
+        top_genes = set(df_de.head(n_query_markers)["names"].astype(str).tolist())
+        n_cells = int((obs_col == g).sum())
+
+        # ---- Overlap with reference ----
+        ref_set = ref_markers.get(str(g), set())
+        overlap = top_genes & ref_set
+
+        pct = round(100.0 * len(overlap) / len(top_genes), 1) if len(top_genes) > 0 else 0.0
+
+        records.append({
+            "group": g,
+            "n_cells": n_cells,
+            "n_de_genes": len(top_genes),
+            "n_ref_markers": len(ref_set),
+            "n_overlap": len(overlap),
+            "pct_overlap": pct,
+            "overlapping_genes": ", ".join(sorted(overlap)) if overlap else "",
+        })
+
+    df_result = pd.DataFrame(records)
+
+    if save_csv and output_dir is not None:
+        os.makedirs(output_dir, exist_ok=True)
+        safe_groupby = groupby.replace("/", "_").replace(" ", "_")
+        csv_path = os.path.join(output_dir, f"{safe_groupby}_marker_validation.csv")
+        df_result.to_csv(csv_path, index=False)
+        _zlog(f"Saved marker validation → {csv_path}")
+
+    return df_result
 
 
 # ================================================================
