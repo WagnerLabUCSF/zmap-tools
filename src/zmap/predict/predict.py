@@ -202,6 +202,197 @@ def _l2_normalize_rows(x: np.ndarray) -> np.ndarray:
     return arr / norms
 
 
+def _has_valid_tissue_labels(adata_query, tissue_col: str) -> bool:
+    """Return True when query has at least one non-empty tissue label."""
+    if tissue_col not in adata_query.obs:
+        return False
+    s = adata_query.obs[tissue_col]
+    if s.isna().all():
+        return False
+    s_norm = pd.Series(s, copy=False).astype("string").str.strip().str.lower()
+    valid = ~(s_norm.isna() | s_norm.isin({"", "nan", "none", "na"}))
+    return bool(valid.any())
+
+
+def _predict_pseudo_tissue_knn(
+    adata_query,
+    *,
+    X_ref: np.ndarray,
+    X_query: np.ndarray,
+    ref_tissue: np.ndarray,
+    query_tissue_col: str,
+    ref_tissue_col: str,
+    n_neighbors: int,
+    metric: str,
+    knn_backend: str,
+    knn_device: str,
+    knn_nprobe: int | None,
+    pseudo_tissue_k: int | None,
+    pseudo_tissue_threshold: float = 0.0,
+    pseudo_tissue_margin_threshold: float = 0.0,
+    unknown_label: str = "unknown",
+    pseudo_col: str | None = None,
+    faiss_cache_prefix: str | None = None,
+    write_query_tissue_col: bool = True,
+    plot_qc: bool = False,
+    save_qc: bool = True,
+    output_dir: str = "zmap_predict",
+) -> dict[str, Any]:
+    """
+    Infer query tissue labels from reference tissues via plain kNN voting.
+
+    Writes pseudo diagnostics to ``adata_query.obs`` and writes assigned
+    tissues to ``adata_query.obs[query_tissue_col]``.
+    """
+    if X_ref.shape[0] <= 0:
+        raise ValueError("No reference rows available for pseudo tissue prediction.")
+
+    if pseudo_tissue_k is None:
+        k_use = min(int(X_ref.shape[0]), max(int(n_neighbors), 31))
+    else:
+        k_use = min(int(X_ref.shape[0]), max(1, int(pseudo_tissue_k)))
+
+    idx, dist, knn_meta = knn_search(
+        X_ref,
+        X_query,
+        n_neighbors=int(k_use),
+        metric=str(metric),
+        backend=str(knn_backend),
+        device=str(knn_device),
+        nprobe=(None if knn_nprobe is None else int(knn_nprobe)),
+        cache_key=(
+            None
+            if faiss_cache_prefix is None
+            else f"{str(faiss_cache_prefix)}|pseudo_tissue"
+        ),
+    )
+
+    ref_tissue_arr = np.asarray(ref_tissue, dtype=object)
+    nbr_labels = ref_tissue_arr[idx]  # (n_query, k_use)
+
+    n_q = int(nbr_labels.shape[0])
+    pred = np.full(n_q, str(unknown_label), dtype=object)
+    max_prob = np.zeros(n_q, dtype=float)
+    margin = np.zeros(n_q, dtype=float)
+    entropy = np.zeros(n_q, dtype=float)
+
+    for i in range(n_q):
+        vals = pd.Series(nbr_labels[i], copy=False).dropna().astype(str).to_numpy()
+        if vals.size == 0:
+            continue
+        uniq, cnt = np.unique(vals, return_counts=True)
+        order = np.argsort(cnt)[::-1]
+        probs = cnt.astype(float) / float(cnt.sum())
+        top_prob = float(probs[order[0]])
+        second_prob = float(probs[order[1]]) if probs.size > 1 else 0.0
+        top_label = str(uniq[order[0]])
+        max_prob[i] = top_prob
+        margin[i] = top_prob - second_prob
+        entropy[i] = float(-np.sum(probs * np.log(np.clip(probs, 1e-12, 1.0))))
+        pred[i] = top_label
+
+    pseudo_col_use = str(pseudo_col) if pseudo_col is not None else f"{query_tissue_col}_pseudo"
+    adata_query.obs[pseudo_col_use] = pd.Series(pred, index=adata_query.obs.index, dtype="string")
+    adata_query.obs[f"{pseudo_col_use}_max_prob"] = max_prob
+    adata_query.obs[f"{pseudo_col_use}_margin"] = margin
+    adata_query.obs[f"{pseudo_col_use}_entropy"] = entropy
+    # Compatibility aliases used by plotting helpers in older API.
+    adata_query.obs[f"{pseudo_col_use}_knn_max_prob"] = max_prob
+    adata_query.obs[f"{pseudo_col_use}_knn_margin"] = margin
+    adata_query.obs[f"{pseudo_col_use}_knn_entropy"] = entropy
+
+    thr = float(pseudo_tissue_threshold)
+    mar_thr = float(pseudo_tissue_margin_threshold)
+    keep_hi = np.ones(n_q, dtype=bool)
+    if thr > 0:
+        keep_hi &= max_prob >= thr
+    if mar_thr > 0:
+        keep_hi &= margin >= mar_thr
+    filtered = np.full(n_q, str(unknown_label), dtype=object)
+    filtered[keep_hi] = pred[keep_hi]
+
+    if bool(write_query_tissue_col):
+        adata_query.obs[query_tissue_col] = pd.Series(
+            filtered, index=adata_query.obs.index, dtype="string"
+        )
+    n_assigned_raw = int(np.sum(pd.Series(pred).astype("string") != str(unknown_label)))
+    n_assigned_filtered = int(np.sum(pd.Series(filtered).astype("string") != str(unknown_label)))
+
+    if bool(plot_qc):
+        os.makedirs(output_dir, exist_ok=True)
+
+        fig1 = plt.figure()
+        plt.hist(pd.Series(max_prob).dropna(), bins=100, color="steelblue", alpha=0.7)
+        if thr > 0:
+            plt.axvline(thr, color="red", linestyle="--", label=f"threshold={thr:g}")
+        plt.title(f"Tissue Predicted Probability\n{int(np.sum(keep_hi))} pass / {n_q} total")
+        plt.xlabel("Predicted Probability")
+        plt.ylabel("Cell Count")
+        if plt.gca().get_legend_handles_labels()[1]:
+            plt.legend()
+        plt.tight_layout()
+        if bool(save_qc):
+            prob_path = os.path.join(output_dir, f"{pseudo_col_use}_qc_probability.png")
+            fig1.savefig(prob_path, dpi=300)
+            print(f"[ZMAP] Saved tissue QC plot: {prob_path}")
+        plt.show()
+
+        fig2 = plt.figure()
+        plt.hist(pd.Series(margin).dropna(), bins=100, color="steelblue", alpha=0.7)
+        if mar_thr > 0:
+            plt.axvline(
+                mar_thr,
+                color="red",
+                linestyle="--",
+                label=f"margin_threshold={mar_thr:g}",
+            )
+        plt.title(f"Tissue Predicted Margin\n{int(np.sum(keep_hi))} pass / {n_q} total")
+        plt.xlabel("Predicted Margin")
+        plt.ylabel("Cell Count")
+        if plt.gca().get_legend_handles_labels()[1]:
+            plt.legend()
+        plt.tight_layout()
+        if bool(save_qc):
+            margin_path = os.path.join(output_dir, f"{pseudo_col_use}_qc_margin.png")
+            fig2.savefig(margin_path, dpi=300)
+            print(f"[ZMAP] Saved tissue QC plot: {margin_path}")
+        plt.show()
+
+    adata_query.uns.setdefault("zmap_pseudo_tissue", {})
+    adata_query.uns["zmap_pseudo_tissue"] = {
+        "enabled": True,
+        "source": "predict_labels_tissue_kNN:auto",
+        "ref_tissue_col": str(ref_tissue_col),
+        "query_tissue_col": str(query_tissue_col),
+        "pseudo_col": str(pseudo_col_use),
+        "k": int(k_use),
+        "threshold": float(thr),
+        "margin_threshold": float(mar_thr),
+        "unknown_label": str(unknown_label),
+        "knn_backend_requested": knn_meta.get("backend_requested", knn_backend),
+        "knn_device_requested": knn_meta.get("device_requested", knn_device),
+        "knn_nprobe_requested": (None if knn_nprobe is None else int(knn_nprobe)),
+        "knn_backend_used": knn_meta.get("backend_used", "sklearn"),
+        "knn_device_used": knn_meta.get("device_used", "cpu"),
+        "n_query": int(adata_query.n_obs),
+        "n_assigned_non_unknown_raw": int(n_assigned_raw),
+        "n_assigned_non_unknown": int(n_assigned_filtered),
+        "n_pass_thresholds": int(np.sum(keep_hi)),
+        "write_query_tissue_col": bool(write_query_tissue_col),
+    }
+
+    return {
+        "k": int(k_use),
+        "pseudo_col": str(pseudo_col_use),
+        "n_assigned_non_unknown_raw": int(n_assigned_raw),
+        "n_assigned_non_unknown": int(n_assigned_filtered),
+        "n_pass_thresholds": int(np.sum(keep_hi)),
+        "threshold": float(thr),
+        "margin_threshold": float(mar_thr),
+        "knn_meta": knn_meta,
+    }
+
+
 def _compute_tissue_aware_neighbors(
     *,
     X_ref: np.ndarray,
@@ -215,6 +406,8 @@ def _compute_tissue_aware_neighbors(
     knn_backend: str,
     knn_device: str,
     knn_nprobe: int | None,
+    hard_allow_global_fallback: bool = True,
+    hard_fallback_min_cells: int | None = None,
     faiss_cache_prefix: str | None = None,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
     """
@@ -290,11 +483,12 @@ def _compute_tissue_aware_neighbors(
                 continue
             r_rows = np.flatnonzero(ref_tissue == tissue)
 
-            if r_rows.size >= k:
+            if r_rows.size > 0 and (not hard_allow_global_fallback):
+                lk = min(int(k), int(r_rows.size))
                 local_idx, local_dist, local_meta = _run_knn(
                     X_ref[r_rows],
                     X_query[q_rows],
-                    k_use=k,
+                    k_use=int(lk),
                     tag=f"local|{str(tissue)}",
                 )
                 if first_meta is None:
@@ -303,18 +497,39 @@ def _compute_tissue_aware_neighbors(
                 ok = local_idx >= 0
                 if np.any(ok):
                     mapped[ok] = r_rows[local_idx[ok]]
-                idx_out[q_rows] = mapped
-                dist_out[q_rows] = local_dist
-            else:
-                if global_idx is None or global_dist is None:
-                    global_idx, global_dist, global_meta = _run_knn(
-                        X_ref,
-                        X_query,
-                        k_use=k,
-                        tag="global_fallback",
+                idx_out[q_rows, :lk] = mapped[:, :lk]
+                dist_out[q_rows, :lk] = local_dist[:, :lk]
+            elif hard_allow_global_fallback:
+                local_min = int(k) if hard_fallback_min_cells is None else max(1, int(hard_fallback_min_cells))
+                if r_rows.size >= local_min:
+                    lk = min(int(k), int(r_rows.size))
+                    local_idx, local_dist, local_meta = _run_knn(
+                        X_ref[r_rows],
+                        X_query[q_rows],
+                        k_use=int(lk),
+                        tag=f"local|{str(tissue)}",
                     )
-                idx_out[q_rows] = global_idx[q_rows]
-                dist_out[q_rows] = global_dist[q_rows]
+                    if first_meta is None:
+                        first_meta = local_meta
+                    mapped = np.full_like(local_idx, -1)
+                    ok = local_idx >= 0
+                    if np.any(ok):
+                        mapped[ok] = r_rows[local_idx[ok]]
+                    idx_out[q_rows, :lk] = mapped[:, :lk]
+                    dist_out[q_rows, :lk] = local_dist[:, :lk]
+                else:
+                    if global_idx is None or global_dist is None:
+                        global_idx, global_dist, global_meta = _run_knn(
+                            X_ref,
+                            X_query,
+                            k_use=k,
+                            tag="global_fallback",
+                        )
+                    idx_out[q_rows] = global_idx[q_rows]
+                    dist_out[q_rows] = global_dist[q_rows]
+            else:
+                # strict hard mode: keep these rows as -1 / NaN when no same-tissue refs
+                pass
 
         knn_meta = global_meta or first_meta or {
             "backend_requested": knn_backend,
@@ -432,6 +647,7 @@ def predict_labels_tissue_kNN(
     ref_tissue_col: str = "ZMAP_Tissue",
     query_tissue_col: str = "ZMAP_Tissue",
     tissue_penalty_lambda: float = 1.0,
+    hard_fallback_min_cells: int | None = 10,
     # --- backend controls (aligned with knn_backend.py) ---
     knn_backend: str = "auto",           # "auto" | "faiss" | "sklearn"
     knn_device: str = "auto",            # "auto" | "cpu" | "cuda" | "cuda:N"
@@ -441,6 +657,10 @@ def predict_labels_tissue_kNN(
     class_prior_alpha: float = 0.0,
     pseudo_tissue_k: int | None = None,
     pseudo_tissue_threshold: float = 0.0,
+    pseudo_tissue_margin_threshold: float = 0.0,
+    auto_pseudo_tissue: bool = False,
+    fallback_to_plain_knn: bool = True,
+    pseudo_tissue_unknown_label: str = "unknown",
     reuse_knn_cache: bool = True,
     confidence_threshold: float | None = None,
     margin_threshold: float = 0.0,
@@ -508,21 +728,18 @@ def predict_labels_tissue_kNN(
         raise ValueError("knn_nprobe must be positive when provided.")
     if int(n_neighbors) <= 0:
         raise ValueError("n_neighbors must be positive.")
-
-    if pseudo_tissue_k is not None or float(pseudo_tissue_threshold) > 0:
-        print(
-            "[ZMAP] predict_labels_tissue_kNN: pseudo_tissue_k / pseudo_tissue_threshold "
-            "are accepted for API compatibility but not used in this function."
-        )
+    if hard_fallback_min_cells is not None and int(hard_fallback_min_cells) <= 0:
+        raise ValueError("hard_fallback_min_cells must be positive when provided.")
+    if pseudo_tissue_k is not None and int(pseudo_tissue_k) <= 0:
+        raise ValueError("pseudo_tissue_k must be positive when provided.")
+    if float(pseudo_tissue_threshold) < 0:
+        raise ValueError("pseudo_tissue_threshold must be >= 0.")
+    if float(pseudo_tissue_margin_threshold) < 0:
+        raise ValueError("pseudo_tissue_margin_threshold must be >= 0.")
     if float(class_prior_alpha) != 0.0:
         print(
             "[ZMAP] predict_labels_tissue_kNN: class_prior_alpha is accepted for "
             "API compatibility but not used in predict_labels_kNN voting."
-        )
-    if float(margin_threshold) > 0:
-        print(
-            "[ZMAP] predict_labels_tissue_kNN: margin_threshold is accepted for API "
-            "compatibility but not applied in predict_labels_kNN."
         )
     if bool(run_time_prediction):
         print(
@@ -561,6 +778,151 @@ def predict_labels_tissue_kNN(
         int(np.sum(np.flatnonzero(ref_keep_mask.to_numpy()) % 1048573)),
     ]
 
+    p_thresh_use = p_thresh
+    if confidence_threshold is not None:
+        p_thresh_use = float(confidence_threshold)
+    hard_min_use = (
+        None if mode != "hard"
+        else (None if hard_fallback_min_cells is None else int(hard_fallback_min_cells))
+    )
+
+    space = label_space or ref_label_col
+    pseudo_info: dict[str, Any] | None = None
+    pseudo_used_for_transfer = False
+
+    def _run_plain_transfer(*, fallback_reason: str | None, pseudo_used: bool) -> None:
+        predict_labels_kNN(
+            adata_query,
+            adata_ref,
+            ref_label_col=ref_label_col,
+            label_space=label_space,
+            query_truth_col=query_truth_col,
+            ref_basis=ref_basis,
+            query_basis=query_basis,
+            label_suffix=label_suffix,
+            time_labels=time_labels,
+            n_neighbors=int(n_neighbors),
+            metric=metric,
+            knn_backend=knn_backend,
+            knn_device=knn_device,
+            knn_nprobe=knn_nprobe,
+            omit_labels=omit_effective,
+            class_balance=class_balance,
+            time_balance=time_balance,
+            balance_gamma=balance_gamma,
+            balance_eps=balance_eps,
+            time_stat_function=time_stat_function,
+            time_trim_alpha=time_trim_alpha,
+            time_winsor_alpha=time_winsor_alpha,
+            time_distance=time_distance,
+            time_sigma=time_sigma,
+            time_inv_eps=time_inv_eps,
+            time_inv_power=time_inv_power,
+            evaluate=evaluate,
+            plot_eval_curves=plot_eval_curves,
+            plot_mapping_qc=plot_mapping_qc,
+            save_mapping_qc=save_mapping_qc,
+            p_thresh=p_thresh_use,
+            d_thresh=d_thresh,
+            min_cells_per_label=min_cells_per_label,
+            apply_filters=apply_filters,
+            output_dir=output_dir,
+            expected_cache_mode="none",
+        )
+        adata_query.uns.setdefault("zmap_labels", {}).setdefault(space, {})
+        adata_query.uns["zmap_labels"][space]["Tissue-aware kNN"] = {
+            "requested_tissue_mode": mode,
+            "effective_tissue_mode": "none",
+            "fallback_to_plain_knn": True,
+            "fallback_reason": fallback_reason,
+            "auto_pseudo_tissue": bool(auto_pseudo_tissue),
+            "pseudo_tissue_used": bool(pseudo_used),
+            "hard_allow_global_fallback": None,
+            "hard_fallback_min_cells": hard_min_use,
+            "pseudo_tissue_k": (None if pseudo_tissue_k is None else int(pseudo_tissue_k)),
+            "pseudo_tissue_threshold": float(pseudo_tissue_threshold),
+            "pseudo_tissue_margin_threshold": float(pseudo_tissue_margin_threshold),
+            "query_tissue_col": str(query_tissue_col),
+            "ref_tissue_col": str(ref_tissue_col),
+        }
+
+    if mode == "none":
+        print("[ZMAP] tissue_mode='none' -> running plain predict_labels_kNN.")
+        _run_plain_transfer(fallback_reason="tissue_mode_none", pseudo_used=False)
+        return
+
+    # Auto pseudo-tissue when query tissues are missing; otherwise optionally fallback.
+    missing_reason = None
+    has_ref_tissue = ref_tissue_col in adata_ref.obs
+    has_query_tissue = _has_valid_tissue_labels(adata_query, query_tissue_col)
+    if not has_ref_tissue:
+        missing_reason = f"missing_ref_tissue_col:{ref_tissue_col}"
+    elif not has_query_tissue and bool(auto_pseudo_tissue):
+        X_ref_pseudo = np.asarray(adata_ref.obsm[ref_basis][ref_keep_mask.values, :], dtype=np.float32)
+        X_query_pseudo = np.asarray(adata_query.obsm[query_basis], dtype=np.float32)
+        if knn_l2norm:
+            X_ref_pseudo = _l2_normalize_rows(X_ref_pseudo)
+            X_query_pseudo = _l2_normalize_rows(X_query_pseudo)
+        ref_tissue_filtered = adata_ref.obs[ref_tissue_col].astype(str).to_numpy()[ref_keep_mask.values]
+        faiss_cache_prefix = (
+            f"taware|ref={ref_basis}|qry={query_basis}|n_ref={X_ref_pseudo.shape[0]}|"
+            f"metric={metric}|mode={mode}|l2={int(bool(knn_l2norm))}"
+        )
+        print(
+            f"[ZMAP] query tissue '{query_tissue_col}' missing; "
+            "running pseudo tissue prediction first."
+        )
+        pseudo_info = _predict_pseudo_tissue_knn(
+            adata_query,
+            X_ref=X_ref_pseudo,
+            X_query=X_query_pseudo,
+            ref_tissue=ref_tissue_filtered,
+            query_tissue_col=str(query_tissue_col),
+            ref_tissue_col=str(ref_tissue_col),
+            n_neighbors=int(n_neighbors),
+            metric=str(metric),
+            knn_backend=str(knn_backend),
+            knn_device=str(knn_device),
+            knn_nprobe=(None if knn_nprobe is None else int(knn_nprobe)),
+            pseudo_tissue_k=(None if pseudo_tissue_k is None else int(pseudo_tissue_k)),
+            pseudo_tissue_threshold=float(pseudo_tissue_threshold),
+            pseudo_tissue_margin_threshold=float(pseudo_tissue_margin_threshold),
+            unknown_label=str(pseudo_tissue_unknown_label),
+            pseudo_col=f"{query_tissue_col}_pseudo",
+            faiss_cache_prefix=faiss_cache_prefix,
+            write_query_tissue_col=True,
+            plot_qc=bool(plot_mapping_qc),
+            save_qc=bool(save_mapping_qc),
+            output_dir=str(output_dir),
+        )
+        pseudo_used_for_transfer = True
+        has_query_tissue = _has_valid_tissue_labels(adata_query, query_tissue_col)
+        if not has_query_tissue:
+            missing_reason = f"pseudo_tissue_failed:{query_tissue_col}"
+    elif not has_query_tissue:
+        missing_reason = f"missing_query_tissue_col:{query_tissue_col}"
+
+    if missing_reason is not None:
+        if bool(fallback_to_plain_knn):
+            print(
+                f"[ZMAP] Tissue-aware unavailable ({missing_reason}); "
+                "falling back to plain predict_labels_kNN."
+            )
+            _run_plain_transfer(
+                fallback_reason=missing_reason,
+                pseudo_used=bool(pseudo_used_for_transfer),
+            )
+            return
+        if str(missing_reason).startswith("missing_ref_tissue_col:"):
+            raise KeyError(
+                f"Missing tissue column in adata_ref.obs: {ref_tissue_col}. "
+                "Set fallback_to_plain_knn=True to fallback."
+            )
+        raise KeyError(
+            f"Missing tissue column in adata_query.obs: {query_tissue_col}. "
+            "Enable auto_pseudo_tissue=True or set fallback_to_plain_knn=True."
+        )
+
     cache = adata_query.uns.get("zmap_neighbors", {})
     reuse_neighbors = False
     if bool(reuse_knn_cache) and isinstance(cache, dict):
@@ -574,6 +936,8 @@ def predict_labels_tissue_kNN(
             and cache.get("ref_tissue_col") == ref_tissue_col
             and cache.get("query_tissue_col") == query_tissue_col
             and float(cache.get("tissue_penalty_lambda", tissue_penalty_lambda)) == float(tissue_penalty_lambda)
+            and bool(cache.get("hard_allow_global_fallback", True)) is False
+            and cache.get("hard_fallback_min_cells", None) == hard_min_use
             and bool(cache.get("knn_l2norm", False)) == bool(knn_l2norm)
             and cache.get("knn_backend_requested", "auto") == knn_backend
             and cache.get("knn_device_requested", "auto") == knn_device
@@ -585,27 +949,12 @@ def predict_labels_tissue_kNN(
     if not reuse_neighbors:
         X_ref = np.asarray(adata_ref.obsm[ref_basis][ref_keep_mask.values, :], dtype=np.float32)
         X_query = np.asarray(adata_query.obsm[query_basis], dtype=np.float32)
-
         if knn_l2norm:
             X_ref = _l2_normalize_rows(X_ref)
             X_query = _l2_normalize_rows(X_query)
 
-        ref_tissue = None
-        query_tissue = None
-        if mode != "none":
-            if ref_tissue_col not in adata_ref.obs:
-                raise KeyError(
-                    f"Missing tissue column in adata_ref.obs: {ref_tissue_col} "
-                    "(required for tissue_mode='hard'/'soft')."
-                )
-            if query_tissue_col not in adata_query.obs:
-                raise KeyError(
-                    f"Missing tissue column in adata_query.obs: {query_tissue_col} "
-                    "(required for tissue_mode='hard'/'soft')."
-                )
-            ref_tissue = adata_ref.obs[ref_tissue_col].astype(str).to_numpy()[ref_keep_mask.values]
-            query_tissue = adata_query.obs[query_tissue_col].astype(str).to_numpy()
-
+        ref_tissue = adata_ref.obs[ref_tissue_col].astype(str).to_numpy()[ref_keep_mask.values]
+        query_tissue = adata_query.obs[query_tissue_col].astype(str).to_numpy()
         faiss_cache_prefix = (
             f"taware|ref={ref_basis}|qry={query_basis}|n_ref={X_ref.shape[0]}|"
             f"metric={metric}|mode={mode}|l2={int(bool(knn_l2norm))}"
@@ -619,6 +968,8 @@ def predict_labels_tissue_kNN(
             metric=str(metric),
             tissue_mode=mode,
             tissue_penalty_lambda=float(tissue_penalty_lambda),
+            hard_allow_global_fallback=False,
+            hard_fallback_min_cells=hard_min_use,
             knn_backend=str(knn_backend),
             knn_device=str(knn_device),
             knn_nprobe=(None if knn_nprobe is None else int(knn_nprobe)),
@@ -636,6 +987,8 @@ def predict_labels_tissue_kNN(
             "ref_tissue_col": ref_tissue_col,
             "query_tissue_col": query_tissue_col,
             "tissue_penalty_lambda": float(tissue_penalty_lambda),
+            "hard_allow_global_fallback": False,
+            "hard_fallback_min_cells": hard_min_use,
             "knn_l2norm": bool(knn_l2norm),
             "knn_backend_requested": knn_meta.get("backend_requested", knn_backend),
             "knn_device_requested": knn_meta.get("device_requested", knn_device),
@@ -645,10 +998,6 @@ def predict_labels_tissue_kNN(
         }
     else:
         print("Reusing cached tissue-aware neighbor graph from adata_query.uns['zmap_neighbors'].")
-
-    p_thresh_use = p_thresh
-    if confidence_threshold is not None:
-        p_thresh_use = float(confidence_threshold)
 
     predict_labels_kNN(
         adata_query,
@@ -689,10 +1038,10 @@ def predict_labels_tissue_kNN(
         expected_cache_mode=mode,
     )
 
-    space = label_space or ref_label_col
     adata_query.uns.setdefault("zmap_labels", {}).setdefault(space, {})
     adata_query.uns["zmap_labels"][space]["Tissue-aware kNN"] = {
-        "tissue_mode": mode,
+        "requested_tissue_mode": mode,
+        "effective_tissue_mode": mode,
         "ref_tissue_col": ref_tissue_col,
         "query_tissue_col": query_tissue_col,
         "tissue_penalty_lambda": float(tissue_penalty_lambda),
@@ -713,9 +1062,20 @@ def predict_labels_tissue_kNN(
         ),
         "knn_l2norm": bool(knn_l2norm),
         "reuse_knn_cache": bool(reuse_knn_cache),
+        "auto_pseudo_tissue": bool(auto_pseudo_tissue),
+        "fallback_to_plain_knn": False,
+        "fallback_reason": None,
+        "pseudo_tissue_used": bool(pseudo_used_for_transfer),
+        "hard_allow_global_fallback": (
+            None if mode != "hard" else False
+        ),
+        "hard_fallback_min_cells": hard_min_use,
         "class_prior_alpha": float(class_prior_alpha),
         "pseudo_tissue_k": (None if pseudo_tissue_k is None else int(pseudo_tissue_k)),
         "pseudo_tissue_threshold": float(pseudo_tissue_threshold),
+        "pseudo_tissue_margin_threshold": float(pseudo_tissue_margin_threshold),
+        "pseudo_tissue_unknown_label": str(pseudo_tissue_unknown_label),
+        "pseudo_tissue_col": (None if pseudo_info is None else pseudo_info.get("pseudo_col")),
         "confidence_threshold": (None if confidence_threshold is None else float(confidence_threshold)),
         "margin_threshold": float(margin_threshold),
         "include_unassigned": bool(include_unassigned),
@@ -729,7 +1089,6 @@ def predict_labels_tissue_kNN(
         "time_monotone_delta": int(time_monotone_delta),
         "time_monotone_gamma": float(time_monotone_gamma),
     }
-
 
 # ================================================================
 #  1. Predict labels via filtered kNN (your full function)
@@ -1097,9 +1456,11 @@ def predict_labels_kNN(
     ref_labels_values = ref_labels.to_numpy()
     neighbor_classes = ref_labels_values[neighbor_indices]  # shape: (n_query, k)
     probabilities_sorted = np.zeros((neighbor_indices.shape[0], C), dtype=float)
+    has_votes = np.zeros(neighbor_indices.shape[0], dtype=bool)
 
     for i, classes in enumerate(neighbor_classes):
-        mask = ~pd.isna(classes)
+        valid_nbr = (neighbor_indices[i] >= 0) & np.isfinite(distances[i])
+        mask = (~pd.isna(classes)) & valid_nbr
         if not np.any(mask):
             continue
         vals = np.asarray(classes[mask], dtype=str)
@@ -1112,8 +1473,11 @@ def predict_labels_kNN(
         s = scores.sum()
         if s > 0:
             probabilities_sorted[i, :] = scores / s
+            has_votes[i] = True
 
     predicted_labels = sorted_classes[np.argmax(probabilities_sorted, axis=1)]
+    predicted_labels = predicted_labels.astype(object)
+    predicted_labels[~has_votes] = pd.NA
 
     # ---------- outputs ----------
     if omit_labels:
