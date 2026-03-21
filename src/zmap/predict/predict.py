@@ -3174,7 +3174,7 @@ def annotate_with_zmap(
     do_ingest: bool = True,
     tissue_aware: bool = False,       # use tissue-aware kNN transfer
     evaluate: bool = False,           # compute accuracy metrics against query_truth_col
-    n_neighbors: int = 25,            # number of neighbors for kNN voting
+    n_neighbors: int = 50,            # number of neighbors for kNN voting
 
     # --- kwargs passthroughs to lower-level steps ---
     preprocess_kwargs: Mapping[str, Any] | None = None,
