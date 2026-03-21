@@ -6,6 +6,10 @@ Label transfer, annotation, and diagnostic visualization.
 Provides the end-to-end ``annotate_with_zmap`` pipeline as well as
 lower-level functions for preprocessing, kNN-based label transfer,
 cluster aggregation, and UMAP overlay plotting.
+
+On-demand plot accessors (``plot_qc``, ``plot_time``, ``plot_heatmap``,
+``show_summary``) let you re-display results from a completed run
+without recomputing.
 """
 
 from .predict import (
@@ -20,6 +24,11 @@ from .predict import (
     plot_embedding_with_ondata_labels,
     map_query_labels,
     annotate_with_zmap,
+    # On-demand accessors
+    plot_qc,
+    plot_time,
+    plot_heatmap,
+    show_summary,
 )
 
 __all__ = [
@@ -34,4 +43,9 @@ __all__ = [
     "plot_embedding_with_ondata_labels",
     "map_query_labels",
     "annotate_with_zmap",
+    # On-demand accessors
+    "plot_qc",
+    "plot_time",
+    "plot_heatmap",
+    "show_summary",
 ]
