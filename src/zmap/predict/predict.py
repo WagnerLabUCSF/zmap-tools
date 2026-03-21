@@ -694,6 +694,10 @@ def predict_labels_kNN(
     balance_gamma: float = 1,
     balance_eps: float = 1e-9,
 
+    # Vote distance-weighting (label transfer):
+    vote_weighting: str | None = 'gaussian',  # None | "gaussian" | "inverse"
+    vote_sigma: float | None = None,          # if None -> per-cell median neighbor distance
+
     # Time aggregation:
     time_stat_function: str = 'trimmed_mean',  # 'median' | 'mean' | 'trimmed_mean' | 'winsor_mean'
     time_trim_alpha: float = 0.25,
@@ -714,7 +718,7 @@ def predict_labels_kNN(
 
     # QC thresholds
     p_thresh: float | None = 0.8,
-    d_thresh: float | None = 0.1,
+    d_thresh: float | None = None,        # deprecated; use vote_weighting instead
     min_cells_per_label: int = 15,
     apply_filters: bool = True,
 
@@ -774,6 +778,16 @@ def predict_labels_kNN(
     balance_gamma : float, default ``1``
         Exponent applied to inverse-frequency weights. Higher values increase
         the strength of balancing.
+    vote_weighting : str or None, default ``"gaussian"``
+        Distance weighting scheme applied to neighbor votes during label
+        transfer. ``None`` uses uniform 1/k voting (discrete probabilities);
+        ``"gaussian"`` applies a Gaussian kernel (continuous probabilities,
+        recommended); ``"inverse"`` uses inverse-distance weights.
+        Gaussian weighting produces better-calibrated confidence scores,
+        smoother ROC/PR curves, and makes ``d_thresh`` unnecessary.
+    vote_sigma : float or None, default ``None``
+        Bandwidth for the Gaussian kernel when ``vote_weighting="gaussian"``.
+        If ``None``, uses the per-cell median neighbor distance (adaptive).
     time_stat_function : str, default ``"trimmed_mean"``
         Aggregation function for predicting a continuous time score per cell.
         One of ``"mean"``, ``"median"``, ``"trimmed_mean"``, ``"winsor_mean"``.
@@ -804,16 +818,19 @@ def predict_labels_kNN(
         managed by a higher-level wrapper (e.g. ``annotate_with_zmap``).
     p_thresh : float or None, default ``0.8``
         Minimum vote probability required to assign a label. Cells below this
-        threshold are marked as unassigned.
-    d_thresh : float or None, default ``0.1``
-        Maximum allowable mean distance to neighbors. Cells exceeding this
-        threshold are marked as low-confidence.
+        threshold are marked as unassigned. With ``vote_weighting="gaussian"``,
+        this is the only filter needed.
+    d_thresh : float or None, default ``None``
+        Deprecated. Maximum allowable mean distance to neighbors. Kept for
+        backward compatibility but redundant when ``vote_weighting`` is set,
+        as distance information is already incorporated into the vote
+        probabilities.
     min_cells_per_label : int, default ``15``
         Minimum number of reference cells a label must have to be included in
         voting. Labels with fewer cells are treated as ``omit_labels``.
     apply_filters : bool, default ``True``
-        Apply ``p_thresh`` and ``d_thresh`` filters to produce the final
-        predicted label column. Set to ``False`` to retain raw predictions.
+        Apply ``p_thresh`` filter to produce the final predicted label column.
+        Set to ``False`` to retain raw predictions.
 
     Returns
     -------
@@ -881,8 +898,18 @@ def predict_labels_kNN(
         raise ValueError("class_balance must be one of {None, 'global_inverse'}.")
     if time_balance not in (None, "global_inverse"):
         raise ValueError("time_balance must be one of {None, 'global_inverse'}.")
+    if vote_weighting not in (None, "gaussian", "inverse"):
+        raise ValueError("vote_weighting must be one of {None, 'gaussian', 'inverse'}.")
     if time_distance not in (None, "gaussian", "inverse"):
         raise ValueError("time_distance must be one of {None, 'gaussian', 'inverse'}.")
+    if d_thresh is not None:
+        warnings.warn(
+            "d_thresh is deprecated and will be removed in a future version. "
+            "Distance information is now incorporated via vote_weighting (default 'gaussian'). "
+            "Use p_thresh alone for QC filtering.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
     if knn_backend not in {"auto", "faiss", "sklearn"}:
         raise ValueError("knn_backend must be one of {'auto', 'faiss', 'sklearn'}.")
     if knn_nprobe is not None and int(knn_nprobe) <= 0:
@@ -1043,11 +1070,23 @@ def predict_labels_kNN(
             continue
         vals = np.asarray(classes[mask], dtype=str)
         idxs = np.searchsorted(sorted_classes, vals)
+        di = distances[i][mask]
+
+        # --- distance weighting for label votes ---
+        if vote_weighting is None:
+            w_vote = np.ones(mask.sum(), dtype=float)
+        elif vote_weighting == "gaussian":
+            sigma = (vote_sigma if (vote_sigma is not None and vote_sigma > 0)
+                     else (np.median(di) + balance_eps))
+            w_vote = np.exp(-(di * di) / (2.0 * sigma * sigma))
+        else:  # "inverse"
+            w_vote = 1.0 / np.power(di + time_inv_eps, time_inv_power)
+
+        # --- class balance weighting ---
         if class_balance == "global_inverse":
-            weights = w_class[idxs]
-            scores = np.bincount(idxs, weights=weights, minlength=C)
-        else:
-            scores = np.bincount(idxs, minlength=C)
+            w_vote = w_vote * w_class[idxs]
+
+        scores = np.bincount(idxs, weights=w_vote, minlength=C)
         s = scores.sum()
         if s > 0:
             probabilities_sorted[i, :] = scores / s
@@ -1157,39 +1196,24 @@ def predict_labels_kNN(
     accept = pd.Series(True, index=adata_query.obs.index)
     if apply_filters:
         use_prob = (p_thresh is not None)
-        use_dist = (d_thresh is not None)
-
-        p_ok = (adata_query.obs[col_prob] >= p_thresh).fillna(False) if use_prob else None
-        d_ok = (adata_query.obs[col_dist] <= d_thresh).fillna(False) if use_dist else None
+        use_dist = (d_thresh is not None)  # legacy; deprecated
 
         if not use_prob and not use_dist:
             accept = pd.Series(True, index=adata_query.obs.index)
-            reason = np.array(["auto"] * len(accept), dtype=object)
-            reason_categories = ["auto"]
-            _zlog("QC skipped: p_thresh=None and d_thresh=None → accepting all cells.")
+            _zlog("QC skipped: p_thresh=None → accepting all cells.")
         else:
-            accept = pd.Series(False, index=adata_query.obs.index)
-            if use_prob:
-                accept |= p_ok
+            p_ok = (adata_query.obs[col_prob] >= p_thresh).fillna(False) if use_prob else pd.Series(True, index=adata_query.obs.index)
+
             if use_dist:
-                accept |= d_ok
-
-            if use_prob and use_dist:
-                reason = np.where(p_ok & d_ok, "both",
-                          np.where(p_ok, "proba",
-                          np.where(d_ok, "distance", "none")))
-                reason_categories = ["proba", "distance", "both", "none"]
-            elif use_prob:
-                reason = np.where(p_ok, "proba", "none")
-                reason_categories = ["proba", "none"]
+                # Legacy d_thresh path: OR logic preserved for backward compat
+                d_ok = (adata_query.obs[col_dist] <= d_thresh).fillna(False)
+                accept = p_ok | d_ok
+                _zlog(f"QC applied: p_thresh={p_thresh} OR d_thresh={d_thresh} (d_thresh is deprecated).")
             else:
-                reason = np.where(d_ok, "distance", "none")
-                reason_categories = ["distance", "none"]
+                # Standard path: single probability gate
+                accept = p_ok
+                _zlog(f"QC applied: p_thresh={p_thresh}.")
 
-            _zlog(f"QC applied with active rules: "
-                  f"{'prob' if use_prob else ''}{' & ' if use_prob and use_dist else ''}{'distance' if use_dist else ''}.")
-
-        adata_query.obs[col_reason] = pd.Categorical(reason, categories=reason_categories)
         adata_query.obs[col_reject] = ~accept
 
         # Mask rejected predictions
@@ -1225,7 +1249,9 @@ def predict_labels_kNN(
             if use_dist:
                 ax2.axvline(d_thresh, color='red', linestyle='--',
                             label=f'd_thresh={d_thresh}')
-            ax2.set_title(f"{metric.title()} Median Distance\n{n_accept} pass / {n_total} total")
+            ax2.set_title(f"{metric.title()} Median Distance (diagnostic)"
+                         if not use_dist else
+                         f"{metric.title()} Median Distance\n{n_accept} pass / {n_total} total")
             ax2.set_xlabel('Neighbor Distance')
             ax2.set_ylabel('Cell Count')
             if ax2.get_legend_handles_labels()[1]:
@@ -1323,6 +1349,8 @@ def predict_labels_kNN(
             "time_balance": time_balance,
             "balance_gamma": balance_gamma,
             "balance_eps": balance_eps,
+            "vote_weighting": vote_weighting,
+            "vote_sigma": ("per-cell-median" if (vote_weighting == "gaussian" and vote_sigma is None) else vote_sigma),
             "time_stat_function": time_stat_function,
             "time_trim_alpha": time_trim_alpha,
             "time_winsor_alpha": time_winsor_alpha,
@@ -1504,6 +1532,8 @@ def predict_labels_tissue_kNN(
     time_balance: str | None = None,
     balance_gamma: float = 1,
     balance_eps: float = 1e-9,
+    vote_weighting: str | None = "gaussian",
+    vote_sigma: float | None = None,
     time_stat_function: str = "trimmed_mean",
     time_trim_alpha: float = 0.25,
     time_winsor_alpha: float = 0.25,
@@ -1517,7 +1547,7 @@ def predict_labels_tissue_kNN(
     save_mapping_qc: bool = True,
     show_qc_plots: bool = True,
     p_thresh: float | None = 0.8,
-    d_thresh: float | None = 0.1,
+    d_thresh: float | None = None,
     min_cells_per_label: int = 15,
     apply_filters: bool = True,
     output_dir: str = "zmap_predict",
@@ -1636,6 +1666,8 @@ def predict_labels_tissue_kNN(
             time_balance=time_balance,
             balance_gamma=balance_gamma,
             balance_eps=balance_eps,
+            vote_weighting=vote_weighting,
+            vote_sigma=vote_sigma,
             time_stat_function=time_stat_function,
             time_trim_alpha=time_trim_alpha,
             time_winsor_alpha=time_winsor_alpha,
@@ -1845,6 +1877,8 @@ def predict_labels_tissue_kNN(
         time_balance=time_balance,
         balance_gamma=balance_gamma,
         balance_eps=balance_eps,
+        vote_weighting=vote_weighting,
+        vote_sigma=vote_sigma,
         time_stat_function=time_stat_function,
         time_trim_alpha=time_trim_alpha,
         time_winsor_alpha=time_winsor_alpha,
