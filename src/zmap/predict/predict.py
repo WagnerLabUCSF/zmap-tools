@@ -1010,7 +1010,7 @@ def predict_labels_kNN(
             reuse_neighbors = True
 
     if not reuse_neighbors:
-        _zlog("Computing kNN graph...")
+        _zlog("Computing new kNN graph on filtered reference...")
         neighbor_indices, distances, knn_meta = knn_search(
             X_ref,
             adata_query.obsm[query_basis],
@@ -3939,12 +3939,14 @@ def validate_markers(
 
     # ---- Run DE ----
     _zlog(f"Running {method} DE test on {len(groups)} groups...")
-    sc.tl.rank_genes_groups(
-        adata_sub,
-        groupby=groupby,
-        method=method,
-        corr_method=corr_method,
-    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", pd.errors.PerformanceWarning)
+        sc.tl.rank_genes_groups(
+            adata_sub,
+            groupby=groupby,
+            method=method,
+            corr_method=corr_method,
+        )
 
     # ---- Extract and filter DE results per group ----
     records = []
@@ -3992,8 +3994,8 @@ def validate_markers(
 
 
 def plot_marker_comparison(
-    df_a: pd.DataFrame, # Predicted
-    df_b: pd.DataFrame, # Truth
+    df_a: pd.DataFrame,
+    df_b: pd.DataFrame,
     *,
     label_a: str = "Predicted",
     label_b: str = "Ground truth",
@@ -4088,8 +4090,8 @@ def plot_marker_comparison(
     # Mean lines
     mean_a = merged["pct_a"].mean()
     mean_b = merged["pct_b"].mean()
-    ax.axvline(mean_a, color="#1f77b4", linestyle="--", linewidth=0.8, alpha=0.6)
-    ax.axvline(mean_b, color="#ff7f0e", linestyle="--", linewidth=0.8, alpha=0.6)
+    ax.axvline(mean_a, color="steelblue", linestyle="--", linewidth=0.8, alpha=0.6)
+    ax.axvline(mean_b, color="coral", linestyle="--", linewidth=0.8, alpha=0.6)
 
     fig.tight_layout()
 
