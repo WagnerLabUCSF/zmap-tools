@@ -2573,9 +2573,11 @@ def plot_embedding_with_ondata_labels(
     figsize: tuple[float, float] = (6, 6),
     dpi: int = 200,
 
-    # ---- point/legend style ----
+    # ---- point style ----
     ref_size: float = 2,
+    ref_alpha: float = 0.3,
     test_size: float = 2,
+    test_alpha: float = 1.0,
     cmap: str = "jet",
     frameon: bool = False,
     sort_order: bool = True,
@@ -2656,8 +2658,15 @@ def plot_embedding_with_ondata_labels(
         Figure size in inches ``(width, height)``.
     dpi : int, default ``200``
         Figure resolution.
-    ref_size, test_size : float, default ``2``
-        Scatter point sizes for reference background and query cells respectively.
+    ref_size : float, default ``2``
+        Scatter point size for reference background cells.
+    ref_alpha : float, default ``0.3``
+        Opacity of reference background points. Lower values push the
+        reference further into the background.
+    test_size : float, default ``2``
+        Scatter point size for query (projected) cells.
+    test_alpha : float, default ``1.0``
+        Opacity of query overlay points.
     cmap : str, default ``"jet"``
         Colormap used for the reference background scatter.
     legend_loc : str, default ``"on data"``
@@ -2679,17 +2688,23 @@ def plot_embedding_with_ondata_labels(
         ``(x_expand, y_expand)`` passed to ``adjustText`` for label placement.
     match_arrow_color_to_text : bool, default ``True``
         Color annotation arrows to match their corresponding text label.
+    ref_kwargs : dict or None, default ``None``
+        Extra keyword arguments forwarded to the reference ``sc.pl.embedding``
+        call. Explicit ``ref_alpha`` takes priority over ``alpha`` in this dict.
+    test_kwargs : dict or None, default ``None``
+        Extra keyword arguments forwarded to the query ``sc.pl.embedding``
+        call. Explicit ``test_alpha`` takes priority over ``alpha`` in this dict.
     show : bool, default ``False``
         Call ``plt.show()`` after rendering.
     save : bool, default ``True``
-        Save the figure as PNG and PDF to ``./zmap/predict/``.
+        Save the figure as PNG and PDF to ``output_dir``.
     return_ax : bool, default ``False``
         Return the main ``matplotlib.axes.Axes`` object.
 
     Returns
     -------
-    matplotlib.axes.Axes or None
-        The main axes when ``return_ax=True``, otherwise ``None``.
+    tuple or None
+        ``(fig, ax_umap, ax_strip)`` when ``return_ax=True``, otherwise ``None``.
     """
     # ---- prepare test AnnData (drop NAs on requested key, cast to categorical) ----
     if filter_na:
@@ -2754,6 +2769,10 @@ def plot_embedding_with_ondata_labels(
     ref_kwargs = {} if ref_kwargs is None else dict(ref_kwargs)
     test_kwargs = {} if test_kwargs is None else dict(test_kwargs)
     time_strip_kwargs = {} if time_strip_kwargs is None else dict(time_strip_kwargs)
+
+    # ---- Inject alpha into kwargs (explicit params take priority) ----
+    ref_kwargs.setdefault("alpha", ref_alpha)
+    test_kwargs.setdefault("alpha", test_alpha)
 
     # ---- Resolve legend_loc: suppress labels when show_labels=False ----
     legend_loc_use = legend_loc if show_labels else "none"
@@ -2932,7 +2951,7 @@ def plot_embedding_with_ondata_labels(
         return fig, ax_umap, ax_strip
 
     return None
-
+    
 # ================================================================
 #  6. Overlap matrix & plot
 # ================================================================
