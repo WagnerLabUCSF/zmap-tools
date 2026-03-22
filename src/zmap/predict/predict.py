@@ -2583,6 +2583,9 @@ def plot_embedding_with_ondata_labels(
     legend_fontsize: float = 5,
     legend_fontweight: str = "normal",
 
+    # ---- label visibility ----
+    show_labels: bool = True,
+
     # ---- label styling ----
     recolor_labels_from_palette: bool = True,
     text_stroke_width: float = 1.0,
@@ -2660,8 +2663,15 @@ def plot_embedding_with_ondata_labels(
     legend_loc : str, default ``"on data"``
         Where to place the category legend. ``"on data"`` draws labels directly
         at centroid positions; other values follow matplotlib legend conventions.
+        Ignored when ``show_labels=False`` (forced to ``"none"``).
     legend_fontsize, legend_fontweight : float and str, default ``5`` and ``"normal"``
         Font size and weight for on-data legend labels.
+    show_labels : bool, default ``True``
+        If ``True``, draw on-data text labels at category centroids with
+        ``adjustText`` repositioning and optional arrow connectors. If
+        ``False``, suppress all text labels and arrows — only the colored
+        scatter is shown, which is useful for clean figures or when the
+        number of categories is too large for readable labels.
     replace_underscores : bool, default ``True``
         Replace underscores in label strings with line breaks for cleaner
         on-data annotation.
@@ -2745,6 +2755,9 @@ def plot_embedding_with_ondata_labels(
     test_kwargs = {} if test_kwargs is None else dict(test_kwargs)
     time_strip_kwargs = {} if time_strip_kwargs is None else dict(time_strip_kwargs)
 
+    # ---- Resolve legend_loc: suppress labels when show_labels=False ----
+    legend_loc_use = legend_loc if show_labels else "none"
+
     # ---- Check if we actually have a time vector ----
     has_time = (
         show_time_strip and
@@ -2793,7 +2806,7 @@ def plot_embedding_with_ondata_labels(
             basis=basis,
             sort_order=sort_order,
             size=test_size,
-            legend_loc=legend_loc,
+            legend_loc=legend_loc_use,
             legend_fontweight=legend_fontweight,
             ax=ax,
             show=False,
@@ -2802,41 +2815,42 @@ def plot_embedding_with_ondata_labels(
             **test_kwargs,
         )
 
-        # --- obtain existing on-data labels ---
-        texts = [t for t in ax.texts]
+        # --- on-data label styling (only when show_labels=True) ---
+        if show_labels:
+            texts = [t for t in ax.texts]
 
-        # --- recolor existing on-data text labels by palette ---
-        if recolor_labels_from_palette:
+            # --- recolor existing on-data text labels by palette ---
+            if recolor_labels_from_palette:
+                for t in texts:
+                    label = t.get_text()
+                    if label in palette:
+                        t.set_color(palette[label])
+
+            # --- add white border to text labels ---
             for t in texts:
-                label = t.get_text()
-                if label in palette:
-                    t.set_color(palette[label])
+                t.set_path_effects([pe.withStroke(linewidth=text_stroke_width, foreground='white')])
 
-        # --- add white border to text labels ---
-        for t in texts:
-            t.set_path_effects([pe.withStroke(linewidth=text_stroke_width, foreground='white')])
+            # --- replace underscores with line breaks ---
+            if replace_underscores:
+                for t in texts:
+                    t.set_text(t.get_text().replace(linebreak_from, linebreak_to))
 
-        # --- replace underscores with line breaks ---
-        if replace_underscores:
-            for t in texts:
-                t.set_text(t.get_text().replace(linebreak_from, linebreak_to))
+            # --- adjust label positions with slim arrows ---
+            if len(texts) > 0:
+                adjust_text(
+                    texts,
+                    ax=ax,
+                    expand=adjust_expand,
+                    arrowprops=arrowprops,
+                    min_arrow_len=min_arrow_len,
+                )
 
-        # --- adjust label positions with slim arrows ---
-        if len(texts) > 0:
-            adjust_text(
-                texts,
-                ax=ax,
-                expand=adjust_expand,
-                arrowprops=arrowprops,
-                min_arrow_len=min_arrow_len,
-            )
-
-        # --- match arrow color to label color ---
-        if match_arrow_color_to_text and len(texts) > 0:
-            arrows = [p for p in ax.patches if isinstance(p, FancyArrowPatch)]
-            for t, a in zip(texts, arrows[-len(texts):]):
-                a.set_color(t.get_color())
-                a.set_alpha(arrow_alpha)
+            # --- match arrow color to label color ---
+            if match_arrow_color_to_text and len(texts) > 0:
+                arrows = [p for p in ax.patches if isinstance(p, FancyArrowPatch)]
+                for t, a in zip(texts, arrows[-len(texts):]):
+                    a.set_color(t.get_color())
+                    a.set_alpha(arrow_alpha)
 
         # ---- time distribution strip on the right (rotated) ----
         if has_time and ax_strip is not None:
@@ -2918,8 +2932,6 @@ def plot_embedding_with_ondata_labels(
         return fig, ax_umap, ax_strip
 
     return None
-
-
 
 # ================================================================
 #  6. Overlap matrix & plot
