@@ -2951,7 +2951,8 @@ def plot_embedding_with_ondata_labels(
         return fig, ax_umap, ax_strip
 
     return None
-    
+
+
 # ================================================================
 #  6. Overlap matrix & plot
 # ================================================================
@@ -4217,8 +4218,14 @@ def plot_embedding(
     label_space: str | None = None,
     *,
     save: bool = False,
+    show_labels: bool = True,
+    ref_size: float = 2,
+    ref_alpha: float = 0.3,
+    test_size: float = 2,
+    test_alpha: float = 1.0,
+    return_ax: bool = False,
     **kwargs,
-) -> None:
+) -> tuple | None:
     """
     Re-plot the UMAP overlay with on-data labels and time strip.
 
@@ -4233,8 +4240,26 @@ def plot_embedding(
         Label namespace. When ``None``, uses the most recent run.
     save : bool, default ``False``
         Save the figure to the run's output directory.
+    show_labels : bool, default ``True``
+        If ``True``, draw on-data text labels at category centroids.
+        If ``False``, suppress all text labels and arrows.
+    ref_size : float, default ``2``
+        Scatter point size for reference background cells.
+    ref_alpha : float, default ``0.3``
+        Opacity of reference background points.
+    test_size : float, default ``2``
+        Scatter point size for query (projected) cells.
+    test_alpha : float, default ``1.0``
+        Opacity of query overlay points.
+    return_ax : bool, default ``False``
+        Return ``(fig, ax_umap, ax_strip)`` instead of ``None``.
     **kwargs
         Extra keyword arguments forwarded to ``plot_embedding_with_ondata_labels``.
+
+    Returns
+    -------
+    tuple or None
+        ``(fig, ax_umap, ax_strip)`` when ``return_ax=True``, otherwise ``None``.
     """
     label_space, config = _resolve_config(adata_query, label_space)
     space_store = adata_query.uns.get("zmap_labels", {}).get(label_space, {})
@@ -4257,13 +4282,19 @@ def plot_embedding(
     time_key = config.get("time_col", "ZMAP_time_id_predicted")
     space_dir = config.get("output_dir", os.path.join("zmap_predict", label_space))
 
-    plot_embedding_with_ondata_labels(
+    return plot_embedding_with_ondata_labels(
         adata_ref_mini,
         adata_query,
         color_key=color_key,
         time_key=time_key,
         show=True,
         save=save,
+        show_labels=show_labels,
+        ref_size=ref_size,
+        ref_alpha=ref_alpha,
+        test_size=test_size,
+        test_alpha=test_alpha,
+        return_ax=return_ax,
         output_dir=space_dir,
         **kwargs,
     )
