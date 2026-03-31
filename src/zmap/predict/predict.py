@@ -2307,6 +2307,11 @@ def build_cell_annotations_table(
     df.index.name = "cell_id"
     df = df.reset_index()
 
+    # Ensure object columns are pure str (np.nan in object dtype is not h5ad-serializable in uns)
+    for col in df.columns:
+        if df[col].dtype == object:
+            df[col] = df[col].fillna("").astype(str)
+
     if save_csv:
         os.makedirs(output_dir, exist_ok=True)
         out_path = os.path.join(output_dir, f"{label_space}_cell_annotations.csv")
