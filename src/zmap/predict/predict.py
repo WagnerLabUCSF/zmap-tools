@@ -962,7 +962,7 @@ def predict_labels_kNN(
         )
 
     # compact digest to validate cache
-    _mask_digest = [int(n_ref_keep), int(np.sum(np.flatnonzero(ref_keep_mask.to_numpy()) % 1048573))]
+    _mask_digest = [str(int(n_ref_keep)), str(int(np.sum(np.flatnonzero(ref_keep_mask.to_numpy()) % 1048573)))]
 
     # filtered reference arrays
     X_ref_all = adata_ref.obsm[ref_basis]
@@ -1101,7 +1101,7 @@ def predict_labels_kNN(
 
     predicted_labels = sorted_classes[np.argmax(probabilities_sorted, axis=1)]
     predicted_labels = predicted_labels.astype(object)
-    predicted_labels[~has_votes] = pd.NA
+    predicted_labels[~has_votes] = np.nan
 
     # ---------- outputs ----------
     if omit_labels:
@@ -1224,7 +1224,7 @@ def predict_labels_kNN(
         adata_query.obs[col_reject] = ~accept
 
         # Mask rejected predictions
-        adata_query.obs.loc[~accept, col_main] = pd.NA
+        adata_query.obs.loc[~accept, col_main] = np.nan
 
         n_total = len(accept)
         n_accept = int(accept.sum())
@@ -1285,7 +1285,7 @@ def predict_labels_kNN(
         rare_labels = label_counts[label_counts < min_cells_per_label].index
         if len(rare_labels) > 0:
             adata_query.obs[col_rareflag] = adata_query.obs[col_main].isin(rare_labels)
-            adata_query.obs.loc[adata_query.obs[col_rareflag], col_main] = pd.NA
+            adata_query.obs.loc[adata_query.obs[col_rareflag], col_main] = np.nan
             adata_query.uns.setdefault('zmap_labels', {}).setdefault(space, {})
             adata_query.uns['zmap_labels'][space]['Rare Labels'] = list(rare_labels)
             _zlog(f"Filtered {len(rare_labels)} rare labels: {list(rare_labels[:10])}{'...' if len(rare_labels) > 10 else ''}")
@@ -1671,8 +1671,8 @@ def predict_labels_tissue_kNN(
         )
 
     mask_digest = [
-        int(n_ref_keep),
-        int(np.sum(np.flatnonzero(ref_keep_mask.to_numpy()) % 1048573)),
+        str(int(n_ref_keep)),
+        str(int(np.sum(np.flatnonzero(ref_keep_mask.to_numpy()) % 1048573))),
     ]
 
     p_thresh_use = p_thresh
@@ -2060,6 +2060,8 @@ def summarize_knn_run(adata_query, label_key):
         ("n_assigned", cov.get("n_assigned")),
         ("pct_assigned", cov.get("pct_assigned")),
     ], columns=["Key", "Value"])
+
+    df["Value"] = df["Value"].astype(str)
 
     return df
 
