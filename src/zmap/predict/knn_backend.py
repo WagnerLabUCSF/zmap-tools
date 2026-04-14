@@ -18,10 +18,12 @@ _FAISS_INDEX_CACHE_ORDER: list[tuple[str, str, int, int]] = []
 
 
 def _as_float32_c(x: np.ndarray) -> np.ndarray:
+    """Cast array to float32 and ensure C-contiguous memory layout (required by FAISS)."""
     return np.ascontiguousarray(np.asarray(x, dtype=np.float32))
 
 
 def _l2_normalize(x: np.ndarray) -> np.ndarray:
+    """Row-wise L2-normalize an array to unit vectors (used for cosine similarity via inner product)."""
     x = _as_float32_c(x)
     norms = np.linalg.norm(x, axis=1, keepdims=True)
     norms = np.where(norms == 0, 1.0, norms)
@@ -29,6 +31,7 @@ def _l2_normalize(x: np.ndarray) -> np.ndarray:
 
 
 def _parse_cuda_device(device: str) -> int:
+    """Parse a device string like 'cuda:1' into an integer GPU index. Returns 0 on failure."""
     d = str(device).strip().lower()
     if ":" in d:
         try:
@@ -44,6 +47,17 @@ def _search_sklearn(
     n_neighbors: int,
     metric: str,
 ) -> tuple[np.ndarray, np.ndarray]:
+    """
+    kNN search using scikit-learn's NearestNeighbors.
+
+    Used as the fallback when FAISS is unavailable or fails. Slower than FAISS
+    on large references but supports any sklearn-compatible metric.
+
+    Returns
+    -------
+    neighbor_indices : np.ndarray, shape (n_query, n_neighbors)
+    distances : np.ndarray, shape (n_query, n_neighbors)
+    """
     nn = NearestNeighbors(n_neighbors=n_neighbors, metric=metric)
     nn.fit(ref)
     distances, neighbor_indices = nn.kneighbors(query, return_distance=True)
@@ -59,6 +73,44 @@ def _search_faiss(
     nprobe: int | None = None,
     cache_key: str | None = None,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    """
+    kNN search using FAISS with optional GPU acceleration and index caching.
+
+    Builds an IVF-Flat index by default for fast approximate search on large references.
+    Falls back to an exact Flat index if IVF training fails. Cosine similarity is
+    implemented as inner product after L2-normalization; euclidean uses L2 distance.
+
+    Parameters
+    ----------
+    ref : np.ndarray, shape (n_ref, d)
+        Reference embedding matrix.
+    query : np.ndarray, shape (n_query, d)
+        Query embedding matrix.
+    n_neighbors : int
+        Number of nearest neighbors to return.
+    metric : {'euclidean', 'cosine'}
+        Distance metric.
+    device : str
+        Target device — 'cpu', 'auto', 'cuda', or 'cuda:<id>'.
+    nprobe : int, optional
+        Number of IVF cells to probe during search. Higher values increase recall
+        at the cost of speed. Defaults to DEFAULT_FAISS_NPROBE (16).
+    cache_key : str, optional
+        If provided, the built FAISS index is cached in-memory under this key and
+        reused on subsequent calls with matching (key, metric, n_ref, d). Up to
+        MAX_FAISS_INDEX_CACHE (16) indices are retained (LRU eviction).
+
+    Returns
+    -------
+    indices : np.ndarray, shape (n_query, n_neighbors), dtype int64
+        Indices into ref for each neighbor. Entries are -1 (set to NaN in distances)
+        when FAISS cannot fill all k neighbors (rare with Flat indices).
+    distances : np.ndarray, shape (n_query, n_neighbors), dtype float32
+        Euclidean distances or cosine-distance proxies (1 - cosine_similarity).
+    meta : dict
+        Diagnostic info: backend_used, device_used, index_type, nlist, nprobe,
+        cache_key_used, cache_hit.
+    """
     try:
         import faiss  # type: ignore
     except Exception as e:
@@ -233,21 +285,47 @@ def knn_search(
     cache_key: str | None = None,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
     """
-    Unified kNN search for ZMAP API.
+    Unified kNN search supporting FAISS and scikit-learn backends.
 
-    backend:
-      - auto: try faiss first, fallback to sklearn
-      - faiss: require faiss, fallback to sklearn with warning
-      - sklearn: force sklearn
-    device:
-      - auto | cpu | cuda | cuda:<id>
-      - used only by faiss backend
-    nprobe:
-      - IVF probe count for FAISS (None -> default)
-      - used only by faiss backend
-    cache_key:
-      - optional key to reuse FAISS index build across repeated calls
-      - used only by faiss backend
+    Tries FAISS first (fast, approximate) and falls back to sklearn (exact) if
+    FAISS is unavailable or raises. Both backends return consistent output shapes
+    and distance semantics.
+
+    Parameters
+    ----------
+    ref : np.ndarray, shape (n_ref, d)
+        Reference embedding matrix.
+    query : np.ndarray, shape (n_query, d)
+        Query embedding matrix.
+    n_neighbors : int
+        Number of nearest neighbors to return per query point.
+    metric : {'cosine', 'euclidean'}, default 'cosine'
+        Distance metric. Cosine is computed as 1 - cosine_similarity.
+    backend : {'auto', 'faiss', 'sklearn'}, default 'auto'
+        Search backend. 'auto' tries FAISS first and falls back to sklearn.
+        'faiss' also falls back to sklearn with a warning if FAISS fails.
+        'sklearn' skips FAISS entirely.
+    device : {'auto', 'cpu', 'cuda', 'cuda:<id>'}, default 'auto'
+        Device for FAISS index. Ignored by the sklearn backend. 'auto' uses
+        GPU if FAISS GPU support is available, otherwise CPU.
+    nprobe : int, optional
+        Number of IVF partitions to probe during FAISS search. Higher values
+        improve recall at the cost of speed. Defaults to DEFAULT_FAISS_NPROBE.
+        Ignored by the sklearn backend and FAISS Flat indices.
+    cache_key : str, optional
+        If provided, the FAISS index built for `ref` is cached in-memory under
+        this key and reused on subsequent calls with the same (key, metric,
+        n_ref, d). Useful when the same reference is queried repeatedly.
+
+    Returns
+    -------
+    indices : np.ndarray, shape (n_query, n_neighbors), dtype int64
+        Row indices into `ref` for each neighbor, ordered by ascending distance.
+    distances : np.ndarray, shape (n_query, n_neighbors), dtype float32
+        Corresponding distances. NaN where FAISS returns invalid indices (-1).
+    meta : dict
+        Diagnostic info including backend_used, device_used, index_type, and
+        cache_hit. Useful for verifying which backend and device were actually used.
     """
     metric = str(metric).lower()
     backend_req = str(backend).lower()
