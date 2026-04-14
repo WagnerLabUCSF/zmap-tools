@@ -2564,6 +2564,7 @@ def plot_embedding_with_ondata_labels(
     # ---- data/keys ----
     color_key: str = "ZMAP_Tissue_predicted",
     basis: str = "X_umap",
+    ref_basis: str | None = None,
     filter_na: bool = True,
 
     # ---- palette handling ----
@@ -2644,7 +2645,12 @@ def plot_embedding_with_ondata_labels(
         Column in ``adata_test.obs`` containing the categorical labels to color
         and annotate. Typically a ``_predicted`` column from ``predict_labels_kNN``.
     basis : str, default ``"X_umap"``
-        ``obsm`` key used for the 2D embedding coordinates in both datasets.
+        ``obsm`` key used for the 2D embedding coordinates in the query dataset.
+    ref_basis : str or None, default ``None``
+        ``obsm`` key for the reference background embedding. When ``None``,
+        falls back to ``basis``. Useful when the query embedding lives in a
+        different key than the reference (e.g. ``basis="X_umap_zmap"`` for
+        the query while the reference uses ``"X_umap"``).
     filter_na : bool, default ``True``
         Drop query cells with ``NaN`` in ``color_key`` before plotting.
     palette : dict or None, default ``None``
@@ -2802,6 +2808,9 @@ def plot_embedding_with_ondata_labels(
     ax_umap = None
     ax_strip = None
 
+    # ---- Resolve ref_basis: defaults to basis if not provided ----
+    ref_basis_use = ref_basis if ref_basis is not None else basis
+
     # ---- figure + axes layout ----
     with plt.rc_context({'figure.figsize': figsize, 'figure.dpi': dpi}):
         if has_time:
@@ -2823,7 +2832,7 @@ def plot_embedding_with_ondata_labels(
         if show_ref:
             ax = sc.pl.embedding(
                 adata_ref,
-                basis=basis,
+                basis=ref_basis_use,
                 show=False,
                 s=ref_size,
                 ax=ax_umap,
@@ -3748,6 +3757,7 @@ def annotate_with_zmap(
                 color_key=f"{space}_predicted",
                 time_key=time_col_actual,
                 basis=_plot_basis,
+                ref_basis="X_umap",
                 show_ref=_show_ref,
                 show=True,
                 save=save_outputs,
@@ -3768,6 +3778,7 @@ def annotate_with_zmap(
                 color_key=f"{space}_predicted",
                 time_key=time_col_actual,
                 basis=_plot_basis,
+                ref_basis="X_umap",
                 show_ref=_show_ref,
                 show=False,
                 save=True,
@@ -4357,6 +4368,7 @@ def plot_embedding(
         color_key=color_key,
         time_key=time_key,
         basis=plot_basis,
+        ref_basis="X_umap",
         show_ref=show_ref,
         show=True,
         save=save,
