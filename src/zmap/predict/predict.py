@@ -2585,6 +2585,7 @@ def plot_embedding_with_ondata_labels(
     ref_alpha: float = 0.3,
     test_size: float = 2,
     test_alpha: float = 1.0,
+    show_ref: bool = True,
     cmap: str = "jet",
     frameon: bool = False,
     sort_order: bool = True,
@@ -2625,9 +2626,10 @@ def plot_embedding_with_ondata_labels(
     Plot a query dataset overlaid on the reference embedding, with on-data labels
     and an optional vertical time distribution strip.
 
-    Renders two layers: (1) the full reference embedding as a faint grey
-    background for spatial context, and (2) the query cells colored by a
-    predicted label column. Labels are drawn directly on the embedding using
+    Renders up to two layers: (1) optionally, the full reference embedding
+    as a faint grey background for spatial context (controlled by
+    ``show_ref``), and (2) the query cells colored by a predicted label
+    column. Labels are drawn directly on the embedding using
     ``adjustText`` to minimize overlap. A vertical colorbar histogram of
     predicted developmental time (``ZMAP_time_id``) can optionally be added
     as a strip on the right side of the figure.
@@ -2674,6 +2676,11 @@ def plot_embedding_with_ondata_labels(
         Scatter point size for query (projected) cells.
     test_alpha : float, default ``1.0``
         Opacity of query overlay points.
+    show_ref : bool, default ``True``
+        If ``True``, draw the reference embedding as a faint grey background
+        for spatial context. If ``False``, only the query cells are plotted
+        (useful when ``do_ingest=False``). When ``False``, ``adata_ref``
+        may be ``None``.
     cmap : str, default ``"jet"``
         Colormap used for the reference background scatter.
     legend_loc : str, default ``"on data"``
@@ -2730,7 +2737,7 @@ def plot_embedding_with_ondata_labels(
     # Only attempt sync if there's no _color_map dict already available
     # (annotate_with_zmap populates _color_map from reference colormaps)
     cmap_dict_key = f"{base_obs}_color_map"
-    if cmap_dict_key not in adata_test_plot.uns:
+    if cmap_dict_key not in adata_test_plot.uns and adata_ref is not None:
         try:
             sync_zmap_colors(adata_ref, obs_key=base_obs)
             sync_zmap_colors(adata_test_plot, obs_key=color_key, ref_adata=adata_ref, ref_obs_key=base_obs)
@@ -2812,15 +2819,18 @@ def plot_embedding_with_ondata_labels(
             fig, ax_umap = plt.subplots()
             ax_strip = None
 
-        # ---- reference embedding in UMAP axis ----
-        ax = sc.pl.embedding(
-            adata_ref,
-            basis=basis,
-            show=False,
-            s=ref_size,
-            ax=ax_umap,
-            **ref_kwargs,
-        )
+        # ---- reference embedding in UMAP axis (optional) ----
+        if show_ref:
+            ax = sc.pl.embedding(
+                adata_ref,
+                basis=basis,
+                show=False,
+                s=ref_size,
+                ax=ax_umap,
+                **ref_kwargs,
+            )
+        else:
+            ax = ax_umap
 
         # ---- query overlay in UMAP axis ----
         ax = sc.pl.embedding(
@@ -3354,7 +3364,7 @@ def annotate_with_zmap(
         - ``.obs[f"{label_space}_predicted"]``                       — transferred cell labels.
         - ``.obs[f"{label_space}_prob"]``                            — label confidence (0–1).
         - ``.obs["ZMAP_time_id_predicted"]``                         — predicted time (hpf).
-        - ``.obsm["X_umap"]``                                        — UMAP coordinates (if ingested).
+        - ``.obsm["X_umap_zmap"]``                                   — projected UMAP coordinates (if ingested).
         - ``.uns['zmap_labels']['_last_space']``                     — most recent label_space.
         - ``.uns['zmap_labels'][label_space]['_run_config']``        — stored run parameters
           for zero-arg on-demand plot accessors.
@@ -3517,9 +3527,29 @@ def annotate_with_zmap(
         if do_ingest:
             if v >= 1:
                 _zlog("Ingesting query into reference UMAP...")
+
+            # Stash pre-existing X_umap so symphony doesn't clobber it
+            _had_existing_umap = "X_umap" in adata_query.obsm
+            if _had_existing_umap:
+                _existing_umap = adata_query.obsm["X_umap"].copy()
+
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", FutureWarning)
                 sp.tl.ingest(adata_query=adata_query, adata_ref=adata_ref)
+
+            # Move ingested coords to X_umap_zmap (non-destructive)
+            adata_query.obsm["X_umap_zmap"] = adata_query.obsm["X_umap"].copy()
+
+            # Restore original X_umap if one existed, otherwise remove
+            if _had_existing_umap:
+                adata_query.obsm["X_umap"] = _existing_umap
+                if v >= 1:
+                    _zlog("Restored pre-existing X_umap; ingested coords in X_umap_zmap.")
+            else:
+                del adata_query.obsm["X_umap"]
+                if v >= 1:
+                    _zlog("Ingested coords stored in X_umap_zmap.")
+
             if v >= 1:
                 _zlog("Ingestion complete.")
 
@@ -3593,15 +3623,26 @@ def annotate_with_zmap(
     adata_query.uns.setdefault("zmap_labels", {})
     adata_query.uns["zmap_labels"]["_last_space"] = space
     adata_query.uns["zmap_labels"].setdefault(space, {})
+    # Determine embedding basis and whether to show reference background
+    if do_ingest:
+        _plot_basis = "X_umap_zmap"
+        _show_ref = True
+    else:
+        # No ingest → query lives in its own UMAP space
+        _plot_basis = "X_umap" if "X_umap" in adata_query.obsm else None
+        _show_ref = False
+
     adata_query.uns["zmap_labels"][space]["_run_config"] = {
         "label_space": space,
         "ref_label_col": ref_label_col,
         "query_label_col": query_label_col,
         "time_col": time_col_actual,
         "output_dir": space_dir,
+        "basis": _plot_basis,
+        "show_ref": _show_ref,
     }
-    # Store reference UMAP for on-demand plot_embedding (avoids needing adata_ref)
-    if "X_umap" in adata_ref.obsm:
+    # Store reference UMAP for on-demand plot_embedding (only when ingested)
+    if do_ingest and "X_umap" in adata_ref.obsm:
         adata_query.uns["zmap_labels"][space]["_ref_umap"] = (
             np.asarray(adata_ref.obsm["X_umap"]).copy()
         )
@@ -3691,15 +3732,23 @@ def annotate_with_zmap(
     # ------------------------------------------------------------------
     # 9. UMAP overlay figure (v >= 2)
     # ------------------------------------------------------------------
-    if v >= 2:
+    if _plot_basis is None:
+        if v >= 1:
+            _zlog(
+                "Skipping UMAP overlay: no embedding found "
+                "(do_ingest=False and no pre-existing X_umap)."
+            )
+    elif v >= 2:
         try:
             if v >= 1:
                 _zlog("Plotting UMAP overlay with predicted labels...")
             plot_embedding_with_ondata_labels(
-                adata_ref,
+                adata_ref if _show_ref else None,
                 adata_query,
                 color_key=f"{space}_predicted",
                 time_key=time_col_actual,
+                basis=_plot_basis,
+                show_ref=_show_ref,
                 show=True,
                 save=save_outputs,
                 output_dir=space_dir,
@@ -3714,10 +3763,12 @@ def annotate_with_zmap(
         # Still save the figure even if not showing it
         try:
             plot_embedding_with_ondata_labels(
-                adata_ref,
+                adata_ref if _show_ref else None,
                 adata_query,
                 color_key=f"{space}_predicted",
                 time_key=time_col_actual,
+                basis=_plot_basis,
+                show_ref=_show_ref,
                 show=False,
                 save=True,
                 output_dir=space_dir,
@@ -4271,19 +4322,30 @@ def plot_embedding(
     label_space, config = _resolve_config(adata_query, label_space)
     space_store = adata_query.uns.get("zmap_labels", {}).get(label_space, {})
 
-    ref_umap = space_store.get("_ref_umap")
-    if ref_umap is None:
+    # Resolve basis and show_ref from stored config
+    plot_basis = config.get("basis", "X_umap_zmap")
+    show_ref = config.get("show_ref", True)
+
+    if plot_basis is None:
         raise KeyError(
-            f"No stored reference UMAP found at "
-            f"adata.uns['zmap_labels']['{label_space}']['_ref_umap']. "
-            "Run annotate_with_zmap first."
+            f"No embedding basis stored for label_space='{label_space}'. "
+            "The original run had do_ingest=False and no pre-existing X_umap."
         )
 
-    # Build a minimal AnnData shell with just the reference UMAP
-    adata_ref_mini = ad.AnnData(
-        obs=pd.DataFrame(index=[f"ref_{i}" for i in range(ref_umap.shape[0])]),
-    )
-    adata_ref_mini.obsm["X_umap"] = ref_umap
+    # Build reference shell only when needed
+    adata_ref_mini = None
+    if show_ref:
+        ref_umap = space_store.get("_ref_umap")
+        if ref_umap is None:
+            raise KeyError(
+                f"No stored reference UMAP found at "
+                f"adata.uns['zmap_labels']['{label_space}']['_ref_umap']. "
+                "Run annotate_with_zmap first."
+            )
+        adata_ref_mini = ad.AnnData(
+            obs=pd.DataFrame(index=[f"ref_{i}" for i in range(ref_umap.shape[0])]),
+        )
+        adata_ref_mini.obsm["X_umap"] = ref_umap
 
     color_key = f"{label_space}_predicted"
     time_key = config.get("time_col", "ZMAP_time_id_predicted")
@@ -4294,6 +4356,8 @@ def plot_embedding(
         adata_query,
         color_key=color_key,
         time_key=time_key,
+        basis=plot_basis,
+        show_ref=show_ref,
         show=True,
         save=save,
         show_labels=show_labels,
