@@ -2229,6 +2229,17 @@ def aggregate_by_cluster(
 
     df = pd.DataFrame(records)
 
+    # Ensure object columns are h5ad-serializable in uns:
+    # - numeric columns demoted to object by pd.NA → coerce back to float (pd.NA → np.nan)
+    # - string columns with pd.NA → fillna("") and cast to str
+    _numeric_cols = {"top_fraction", "mean_prob", "margin", "second_fraction"}
+    for col in df.columns:
+        if df[col].dtype == object:
+            if col in _numeric_cols:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+            else:
+                df[col] = df[col].fillna("").astype(str)
+
     if save_csv:
         os.makedirs(output_dir, exist_ok=True)
         out_path = os.path.join(output_dir, f"{label_space}_cluster_summary.csv")
