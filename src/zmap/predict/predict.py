@@ -2591,6 +2591,7 @@ def plot_embedding_with_ondata_labels(
     # ---- figure style ----
     figsize: tuple[float, float] = (6, 6),
     dpi: int = 200,
+    title_fontsize: float = 8,
 
     # ---- point style ----
     ref_size: float = 2,
@@ -2870,6 +2871,7 @@ def plot_embedding_with_ondata_labels(
             palette=palette,
             **test_kwargs,
         )
+        ax.title.set_fontsize(title_fontsize)
 
         # --- on-data label styling (only when show_labels=True) ---
         if show_labels:
@@ -3147,15 +3149,20 @@ def map_query_labels(
     fig = None
     if show_plot or save_plots:
         plt.rcParams["axes.grid"] = False
-        fig, ax = plt.subplots(figsize=(figsize, figsize))
+        n_rows, n_cols = plot_table.shape
+        cell_size = 0.35
+        auto_w = max(figsize, n_cols * cell_size)
+        auto_h = max(figsize, n_rows * cell_size)
+        tick_fontsize = max(5, min(10, 120 / max(n_rows, n_cols)))
+        fig, ax = plt.subplots(figsize=(auto_w, auto_h))
 
         im = ax.imshow(plot_table.to_numpy(), cmap=cmap, vmin=vmin, vmax=vmax)
 
         ax.set_aspect("equal")
         ax.set_xticks(np.arange(plot_table.shape[1]))
         ax.set_yticks(np.arange(plot_table.shape[0]))
-        ax.set_xticklabels(plot_table.columns, rotation=90)
-        ax.set_yticklabels(plot_table.index)
+        ax.set_xticklabels(plot_table.columns, rotation=90, fontsize=tick_fontsize)
+        ax.set_yticklabels(plot_table.index, fontsize=tick_fontsize)
         ax.set_title(title)
         ax.set_xlabel(obs_A)
         ax.set_ylabel(obs_B)
