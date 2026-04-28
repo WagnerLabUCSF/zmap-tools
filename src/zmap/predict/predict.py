@@ -991,7 +991,7 @@ def predict_labels_kNN(
             cache.get('query_basis') == query_basis and
             cache.get('metric') == metric and
             cache.get('n_neighbors') == n_neighbors and
-            cache.get('mask_digest') == _mask_digest and
+            list(cache.get('mask_digest', [])) == list(_mask_digest) and
             cache.get('tissue_mode', 'none') == expected_cache_mode and
             cache.get('knn_backend_requested', 'auto') == knn_backend and
             cache.get('knn_device_requested', 'auto') == knn_device and
@@ -4058,6 +4058,7 @@ def validate_markers(
             groupby=groupby,
             method=method,
             corr_method=corr_method,
+            use_raw=False,
         )
 
     # ---- Extract and filter DE results per group ----
