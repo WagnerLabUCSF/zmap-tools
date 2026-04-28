@@ -2591,7 +2591,7 @@ def plot_embedding_with_ondata_labels(
     # ---- figure style ----
     figsize: tuple[float, float] = (6, 6),
     dpi: int = 200,
-    title_fontsize: float = 12,
+    title_fontsize: float = 10,
 
     # ---- point style ----
     ref_size: float = 2,
