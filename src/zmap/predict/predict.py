@@ -2591,7 +2591,7 @@ def plot_embedding_with_ondata_labels(
     # ---- figure style ----
     figsize: tuple[float, float] = (6, 6),
     dpi: int = 200,
-    title_fontsize: float = 8,
+    title_fontsize: float = 12,
 
     # ---- point style ----
     ref_size: float = 2,
@@ -3150,11 +3150,12 @@ def map_query_labels(
     if show_plot or save_plots:
         plt.rcParams["axes.grid"] = False
         n_rows, n_cols = plot_table.shape
-        cell_size = 0.35
-        auto_w = max(figsize, n_cols * cell_size)
-        auto_h = max(figsize, n_rows * cell_size)
-        tick_fontsize = max(5, min(10, 120 / max(n_rows, n_cols)))
-        fig, ax = plt.subplots(figsize=(auto_w, auto_h))
+        tick_fontsize = 8
+        cell_size = 0.25          # inches per cell — fits 8pt labels without crowding
+        fig_w = min(28, max(figsize, n_cols * cell_size))
+        fig_h = min(28, max(figsize, n_rows * cell_size))
+        cb_shrink = min(0.8, 3.0 / fig_h)   # keep colorbar ~3 inches tall
+        fig, ax = plt.subplots(figsize=(fig_w, fig_h))
 
         im = ax.imshow(plot_table.to_numpy(), cmap=cmap, vmin=vmin, vmax=vmax)
 
@@ -3167,7 +3168,7 @@ def map_query_labels(
         ax.set_xlabel(obs_A)
         ax.set_ylabel(obs_B)
 
-        cb = fig.colorbar(im, ax=ax, shrink=0.5)
+        cb = fig.colorbar(im, ax=ax, shrink=cb_shrink)
         cb.ax.set_ylabel(colorbar_label)
 
         if overlay_values:
