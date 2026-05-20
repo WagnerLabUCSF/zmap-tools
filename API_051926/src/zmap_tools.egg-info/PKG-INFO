@@ -1,0 +1,153 @@
+Metadata-Version: 2.4
+Name: zmap_tools
+Version: 0.1.0
+Summary: API for working with ZMAP (Zebrafish Multi-Atlas Project)
+Author-email: Daniel Wagner <Daniel.Wagner@ucsf.edu>
+License: BSD 3-Clause License
+        
+        Copyright (c) 2025, Daniel Wagner
+        All rights reserved.
+        
+        Redistribution and use in source and binary forms, with or without
+        modification, are permitted provided that the following conditions are met:
+        
+        1. Redistributions of source code must retain the above copyright notice,
+           this list of conditions and the following disclaimer.
+        
+        2. Redistributions in binary form must reproduce the above copyright
+           notice, this list of conditions and the following disclaimer in the
+           documentation and/or other materials provided with the distribution.
+        
+        3. Neither the name of the copyright holder nor the names of its
+           contributors may be used to endorse or promote products derived from
+           this software without specific prior written permission.
+        
+        THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+        AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+        IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+        DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+        FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+        DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+        SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+        CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+        OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+        OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+        
+Project-URL: Homepage, https://github.com/WagnerLabUCSF/zmap_tools
+Project-URL: Issues, https://github.com/WagnerLabUCSF/zmap_tools/issues
+Keywords: single-cell,zebrafish,rna-seq,reference atlas,scanpy
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: anndata>=0.10
+Requires-Dist: scanpy>=1.9
+Requires-Dist: numpy>=1.24
+Requires-Dist: pandas>=2.0
+Requires-Dist: scipy>=1.10
+Requires-Dist: scikit-learn>=1.3
+Requires-Dist: adjustText>=1.0
+Requires-Dist: matplotlib>=3.7
+Requires-Dist: requests>=2.31
+Provides-Extra: faiss-cpu
+Requires-Dist: faiss-cpu>=1.8.0; extra == "faiss-cpu"
+Dynamic: license-file
+
+zmap-tools
+
+## Environments
+
+Use one FAISS variant per environment:
+
+- CPU: `conda env create -f environment.cpu.yml`
+- GPU: `conda env create -f environment.gpu.yml`
+- Base (no FAISS): `conda env create -f environment.base.yml`
+
+Do not install `faiss-cpu` and `faiss-gpu` into the same conda environment.
+
+Then activate and install in editable mode (already included in yml via `-e .`):
+
+- `conda activate zmap-api-cpu` or `conda activate zmap-api-gpu`
+
+If you install with pip directly and want FAISS CPU auto-installed:
+
+- `pip install -e ".[faiss-cpu]"`
+
+## kNN Backend Inference
+
+`zmap.predict.predict_labels_kNN` supports:
+
+- `knn_backend`: `"auto" | "faiss" | "sklearn"` (default: `"auto"`)
+- `knn_device`: `"auto" | "cpu" | "cuda" | "cuda:N"` (default: `"auto"`)
+
+Behavior:
+
+- `auto`: tries FAISS first, then falls back to sklearn if unavailable.
+- `knn_device` is used only for FAISS.
+- If CUDA is requested but unavailable, FAISS falls back to CPU.
+
+Run metadata is stored in:
+
+- `adata_query.uns["zmap_neighbors"]`:
+  - `knn_backend_requested`, `knn_device_requested`
+  - `knn_backend_used`, `knn_device_used`
+
+## New High-Level Functions
+
+- `zmap.apply_encoder(adata_query, ...)`
+  - Projects query to latent using model resolution priority:
+    - `ZMAP_ENCODER_MODEL_DIR` (env var)
+    - `$ZMAP_HOME/models/phase3_normalize_noknn_fullsample_v2_cpu_fast_harmony_dropout0p2/model`
+    - legacy local fallback path (for backward compatibility)
+  - Writes latent to `adata_query.obsm["X_pca_harmony_pred"]` by default.
+
+- `zmap.predict.predict_labels_kNN(adata_query, adata_ref, ...)`
+  - Runs label transfer on latent space.
+  - Default is ordinary kNN: `tissue_aware=False`.
+  - Enable tissue-aware kNN with `tissue_aware=True`.
+  - When `tissue_aware=True`, you must either:
+    - pass `tissue_col="..."` for the tissue column present in reference and query, or
+    - set `predict_tissue_level=True` to infer query tissue labels first as context.
+  - Do not use `tissue_aware=True` when `ref_label_col` itself is the tissue column; for tissue-level prediction, use ordinary kNN.
+  - Tissue-aware neighbor modes are selected with `tissue_mode="hard"` or `"soft"`.
+  - Tissue-aware hard mode searches within matching tissue when enough reference cells exist, otherwise falls back to global kNN.
+  - Tissue-aware soft mode adds `tissue_penalty_lambda` to mismatched-tissue neighbor distances before selecting neighbors.
+  - Caches neighbor indices/distances in `adata_query.uns["zmap_neighbors"]` and includes tissue-aware settings in the cache key.
+  - Writes outputs to query `obs`:
+    - `<label_space>` or `<label_space>_<label_suffix>`
+    - `<label_space>_unfilt`
+    - `<label_space>_prob`
+    - `<label_space>_dist`
+  - Run summaries are stored under `adata_query.uns["zmap_labels"][label_space]`.
+
+- `zmap.time_prediction(...)`
+  - Runs kNN-based time regression using the same latent space and tissue-aware mode options.
+  - Reuses `adata_query.uns["zmap_knn_cache"]` when settings match (avoids recomputing kNN).
+  - Writes time outputs to query `obs` with `<time_col>_...` columns and stores metadata in
+    `adata_query.uns["zmap_time_prediction"]`.
+
+- `zmap.knn_config(...)`
+  - Builds a shared KNN config dict for encoder-pipeline utilities such as
+    `zmap.time_prediction(...)`.
+
+- `zmap.plot_confusion_matrix(...)`
+  - Plots confusion matrices with the legacy train/apply style.
+  - Example:
+    - `zmap.plot_confusion_matrix(adata_query, source="knn", level="ZMAP_CellType", normalize=False)`
+    - `zmap.plot_confusion_matrix(adata_query, source="time", normalize=False)`
+
+- `zmap.plot_leiden_celltype(...)`
+  - Plots Leiden x predicted-celltype proportion heatmap directly from `adata_query.obs`.
+
+- `zmap.plot_conf_entropy_margin(...)`
+  - Plots confidence (x) vs entropy (y), colored by margin.
+  - Supports threshold tuple `(conf, entropy, margin)`.
+  - Points failing active thresholds are shown as `X`.
+  - Example:
+    - `zmap.plot_conf_entropy_margin(adata_query, base="ZMAP_CellType", threshold=(0, 0, 0.2))`
+
+## Default Asset Directory
+
+- `ZMAP_HOME` controls package asset directory.
+- If unset, defaults to:
+  - `$XDG_DATA_HOME/zmap` (if `XDG_DATA_HOME` is set), else
+  - `~/.local/share/zmap`

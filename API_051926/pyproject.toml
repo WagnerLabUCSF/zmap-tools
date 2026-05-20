@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zmap_tools"
+version = "0.1.0"
+description = "API for working with ZMAP (Zebrafish Multi-Atlas Project)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+
+authors = [
+  { name = "Daniel Wagner", email = "Daniel.Wagner@ucsf.edu" }
+]
+
+keywords = ["single-cell", "zebrafish", "rna-seq", "reference atlas", "scanpy"]
+
+dependencies = [
+  "anndata>=0.10",
+  "scanpy>=1.9",
+  "numpy>=1.24",
+  "pandas>=2.0",
+  "scipy>=1.10",
+  "scikit-learn>=1.3",
+  "adjustText>=1.0",
+  "matplotlib>=3.7",
+  "requests>=2.31",
+]
+
+[project.optional-dependencies]
+faiss-cpu = [
+  "faiss-cpu>=1.8.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/WagnerLabUCSF/zmap_tools"
+Issues = "https://github.com/WagnerLabUCSF/zmap_tools/issues"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true #change path
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data] #change path
+zmap = [
+  "predict/baseline2_file/**/*", #change path
+]
