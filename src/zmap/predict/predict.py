@@ -232,6 +232,7 @@ def preprocess_adata_query(
         adata.X = np.log1p(X_tpm)
 
     # ---- 5. bookkeeping ----
+    adata.uns["log1p"] = {"base": None}
     adata.uns.setdefault("ZMAP_preprocessing", {})
     adata.uns["ZMAP_preprocessing"]["query"] = {
         "counts_source": counts_source,
@@ -3266,7 +3267,7 @@ def annotate_with_zmap(
     predict_kwargs: Mapping[str, Any] | None = None,
 
     # --- output controls ---
-    verbosity: int = 2,               # 0=silent, 1=progress, 2=summary+UMAP+QC, 3=full
+    verbosity: int = 3,               # 0=silent, 1=progress, 2=summary+UMAP+QC, 3=full
     debug: bool = False,              # if True, re-raise exceptions instead of catching
     print_summary: bool | None = None,   # deprecated → use verbosity
     show_plots: bool | None = None,      # deprecated → use verbosity
@@ -3362,7 +3363,7 @@ def annotate_with_zmap(
         Extra keyword arguments forwarded to ``predict_labels_kNN``.
         For common options, prefer the top-level ``tissue_aware`` and
         ``evaluate`` parameters instead of passing dicts manually.
-    verbosity : int, default ``2``
+    verbosity : int, default ``3``
         Controls how much output is printed and displayed inline:
 
         - ``0`` — silent (no print, no inline plots).
@@ -3737,6 +3738,7 @@ def annotate_with_zmap(
 
     # ------------------------------------------------------------------
     # 8. Copy colormap dict from reference → query (order-independent)
+    # Also copy reference color palettes and order lists
     # ------------------------------------------------------------------
     cmap_src_key = _COLORMAP_UNS_KEY.get(ref_label_col)
     if cmap_src_key and cmap_src_key in adata_ref.uns:
@@ -3756,6 +3758,13 @@ def annotate_with_zmap(
             "arrays — palette may be incorrect if query categories differ from reference.",
             stacklevel=2,
         )
+    
+    # Standard palettes
+    keys = ["ZMAP_CellType_order","ZMAP_Tissue_order","ZMAP_colormap_C12","ZMAP_colormap_C79",
+        "ZMAP_colormap_G7","ZMAP_colormap_T28","ZMAP_colormap_T7"]
+    for k in keys:
+        if k in adata_ref.uns:
+            adata_query.uns[k] = adata_ref.uns[k]
 
     # ------------------------------------------------------------------
     # 9. UMAP overlay figure (v >= 2)
