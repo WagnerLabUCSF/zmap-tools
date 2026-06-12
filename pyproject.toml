@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zmap-tools"
-version = "0.2.2"
+version = "0.2.2.1"
 description = "API for working with ZMAP (Zebrafish Multi-Atlas Project)"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -40,6 +40,8 @@ dependencies = [
   "tqdm>=4.66",
   "adjustText>=0.8",
   "symphonypy>=0.2",
+  "igraph>=1.0.0",
+  "leidenalg>=0.12.0"
 ]
 
 [project.urls]
