@@ -29,7 +29,8 @@ classifiers = [
 dependencies = [
   "anndata>=0.10",
   "scanpy>=1.9",
-  "numpy>=1.24",
+  "numpy>=2.0,<2.3",
+  "numba>=0.58,<0.66",
   "pandas>=2.0,<3.0",
   "matplotlib>=3.7",
   "requests>=2.31",
@@ -41,7 +42,7 @@ dependencies = [
   "adjustText>=0.8",
   "symphonypy>=0.2",
   "igraph>=1.0.0",
-  "leidenalg>=0.12.0"
+  "leidenalg>=0.12.0",
 ]
 
 [project.urls]
