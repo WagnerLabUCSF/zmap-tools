@@ -33,6 +33,31 @@ from .predict import (
     validate_markers,
     plot_marker_comparison,
 )
+from .encoder_pipeline import (
+    apply_encoder,
+    zmap_projection,
+    predict_pseudo_tissue,
+    knn_config,
+    build_module_faiss,
+    build_module_concat_reference,
+    apply_module_concat_query,
+    time_prediction_KNN,
+    plot_conf_entropy_margin,
+    plot_pseudo_tissue_conf_entropy_margin,
+    plot_confusion_matrix,
+    report_leiden_celltype_topk,
+    plot_leiden_celltype,
+    plot_projection_celltype_overlay,
+)
+from .baseline2 import (
+    predict_labels_MLP,
+    predict_labels_mlp,
+    predict_labels_baseline2,
+    predict_labels_baseline_tissue,
+    time_prediction_MLP,
+    baseline2,
+    baseline_tissue,
+)
 
 __all__ = [
     "preprocess_adata_query",
@@ -54,4 +79,28 @@ __all__ = [
     "show_summary",
     "validate_markers",
     "plot_marker_comparison",
+]
+
+__all__ += [
+    "apply_encoder",
+    "zmap_projection",
+    "predict_pseudo_tissue",
+    "knn_config",
+    "build_module_faiss",
+    "build_module_concat_reference",
+    "apply_module_concat_query",
+    "time_prediction_KNN",
+    "plot_conf_entropy_margin",
+    "plot_pseudo_tissue_conf_entropy_margin",
+    "plot_confusion_matrix",
+    "report_leiden_celltype_topk",
+    "plot_leiden_celltype",
+    "plot_projection_celltype_overlay",
+    "predict_labels_MLP",
+    "predict_labels_mlp",
+    "predict_labels_baseline2",
+    "predict_labels_baseline_tissue",
+    "time_prediction_MLP",
+    "baseline2",
+    "baseline_tissue",
 ]
