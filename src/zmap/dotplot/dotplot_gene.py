@@ -39,6 +39,29 @@ DEFAULT_ROW_COLOR_GROUPS_ZMAP_CellType = {
 
 DEFAULT_ROW_DIVIDERS_ZMAP_CellType = [1, 11, 18, 24, 31, 35, 49, 63, 68, 73, 76]
 
+DEFAULT_CLUSTER_ORDER_ZMAP_Tissue = [
+    'blastomeres',
+    'ectoderm_early', 'epidermis', 'ionocyte_epithelium', 'placodes',
+    'endoderm_early', 'pharyngeal', 'intestine', 'liver', 'pancreas',
+    'neural_crest',
+    'neural_early', 'eye', 'forebrain', 'midbrain', 'hindbrain', 'spinal_cord', 'neurons',
+    'mesoderm_early', 'axial_meso', 'somitic_meso', 'muscle', 'lateral_plate', 'endothelial', 'fin_bud', 'heart', 'hematopoietic', 'intermediate_meso',
+    'primordial_germ_cell',
+    ]
+
+DEFAULT_ROW_COLOR_GROUPS_ZMAP_Tissue = {
+    "black":      ["blastomeres"],
+    "green":      ['ectoderm_early', 'epidermis', 'ionocyte_epithelium', 'placodes'],
+    "darkorange": ['endoderm_early', 'pharyngeal', 'intestine', 'liver', 'pancreas'],
+    "steelblue":  ['neural_crest'],
+    "blue":       ['neural_early', 'eye', 'forebrain', 'midbrain', 'hindbrain', 'spinal_cord', 'neurons'],
+    "darkblue":   ['optic_cup', 'retinal_pigment_epithelium', 'retina', 'photoreceptors'],
+    "red":        ['mesoderm_early', 'axial_meso', 'somitic_meso', 'muscle', 'lateral_plate', 'endothelial', 'fin_bud', 'heart', 'hematopoietic', 'intermediate_meso'],
+    "purple":     ["primordial_germ_cell"],
+}
+
+DEFAULT_ROW_DIVIDERS_ZMAP_Tissue = [1, 5, 12, 13, 18, 28]
+
 DEFAULT_STUDY_ORDER = ["Kamimoto2023", "Farrell2018", "Kukreja2024", "Wagner2018",
 "Farnsworth2020", "Lange2023", "Sur2023", "Spanjaard2018"]
 
@@ -484,7 +507,7 @@ def gene_groups_vs_time(
     size_legend_title: str | None = None,
     size_legend_facecolor: str = "black",
     # ===== ordering & filtering =====
-    cluster_order: list[str] | None = DEFAULT_CLUSTER_ORDER_ZMAP_CellType,
+    cluster_order: list[str] | None = None,
     time_order: list[str] | None = None,
     omit_groups: list[str] | None = ['nan', 'unknown'],
     # ===== cosmetics =====
@@ -497,10 +520,10 @@ def gene_groups_vs_time(
     tick_grid_alpha: float = 0.15,
     tick_grid_lw: float = 0.6,
     # ===== Row color group mapping & legend =====
-    row_color_groups: dict[str, list[str]] | None = DEFAULT_ROW_COLOR_GROUPS_ZMAP_CellType,
+    row_color_groups: dict[str, list[str]] | None = None,
     show_row_color_legend: bool = False,
     # ===== Horizontal split lines between rows =====
-    row_dividers: list[int] | None = DEFAULT_ROW_DIVIDERS_ZMAP_CellType,
+    row_dividers: list[int] | None = None,
     row_divider_color: str = "black",
     row_divider_lw: float = 0.5,
     row_divider_alpha: float = 1,
@@ -570,6 +593,20 @@ def gene_groups_vs_time(
     >>> ax, _ = zmap.dotplot.dotplot_gene.gene_groups_vs_time(adata_ref, "sox2")
     """
     color = str(color)
+
+    # Select defaults based on grouping
+    if groupby not in ("ZMAP_CellType", "ZMAP_Tissue"):
+        raise ValueError("groupby must be 'ZMAP_CellType' or 'ZMAP_Tissue'")
+
+    if cluster_order is None:
+        cluster_order = globals()[f"DEFAULT_CLUSTER_ORDER_{groupby}"]
+    if row_color_groups is None:
+        row_color_groups = globals()[f"DEFAULT_ROW_COLOR_GROUPS_{groupby}"]
+    if row_dividers is None:
+        row_dividers = globals()[f"DEFAULT_ROW_DIVIDERS_{groupby}"]
+
+    if figsize is None and groupby == "ZMAP_Tissue":
+        figsize = (4, 5)
 
     # ------------------------ color vector ------------------------
     x, color_source = _extract_color_vector(adata, color, layer, use_raw)
@@ -785,9 +822,9 @@ def gene_groups_vs_time(
             size_legend_title=size_legend_title,
             size_legend_facecolor=size_legend_facecolor,
             left=1.0 - gutter_pad - 0.18,
-            bottom=0.55,
+            bottom=0.40 if groupby == "ZMAP_Tissue" else 0.55,
             width=0.22,
-            height=0.10,
+            height=0.20 if groupby == "ZMAP_Tissue" else 0.10,
             background=background,
         )
 
@@ -878,7 +915,7 @@ def gene_groups_vs_studies(
     size_legend_title: str | None = None,
     size_legend_facecolor: str = "black",
     # ===== ordering & filtering =====
-    cluster_order: list[str] | None = DEFAULT_CLUSTER_ORDER_ZMAP_CellType,
+    cluster_order: list[str] | None = None,
     study_order: list[str] | None = DEFAULT_STUDY_ORDER,
     omit_groups: list[str] | None = ['nan', 'unknown'],     # omits clusters
     # ===== cosmetics =====
@@ -891,10 +928,10 @@ def gene_groups_vs_studies(
     tick_grid_alpha: float = 0.15,
     tick_grid_lw: float = 0.6,
     # ===== Row color group mapping & legend =====
-    row_color_groups: dict[str, list[str]] | None = DEFAULT_ROW_COLOR_GROUPS_ZMAP_CellType,
+    row_color_groups: dict[str, list[str]] | None = None,
     show_row_color_legend: bool = False,
     # ===== Horizontal split lines between rows =====
-    row_dividers: list[int] | None = DEFAULT_ROW_DIVIDERS_ZMAP_CellType,
+    row_dividers: list[int] | None = None,
     row_divider_color: str = "black",
     row_divider_lw: float = 0.5,
     row_divider_alpha: float = 1,
@@ -963,6 +1000,20 @@ def gene_groups_vs_studies(
     >>> ax, _ = zmap.dotplot.dotplot_gene.gene_groups_vs_studies(adata_ref, "myod1")
     """
     color = str(color)
+
+    # Select defaults based on grouping
+    if groupby not in ("ZMAP_CellType", "ZMAP_Tissue"):
+        raise ValueError("groupby must be 'ZMAP_CellType' or 'ZMAP_Tissue'")
+
+    if cluster_order is None:
+        cluster_order = globals()[f"DEFAULT_CLUSTER_ORDER_{groupby}"]
+    if row_color_groups is None:
+        row_color_groups = globals()[f"DEFAULT_ROW_COLOR_GROUPS_{groupby}"]
+    if row_dividers is None:
+        row_dividers = globals()[f"DEFAULT_ROW_DIVIDERS_{groupby}"]
+
+    if figsize is None and groupby == "ZMAP_Tissue":
+        figsize = (4, 5)
 
     # ------------------------ color vector ------------------------
     x, color_source = _extract_color_vector(adata, color, layer, use_raw)
@@ -1179,9 +1230,9 @@ def gene_groups_vs_studies(
             size_legend_title=size_legend_title,
             size_legend_facecolor=size_legend_facecolor,
             left=1.0 - gutter_pad - 0.18,
-            bottom=0.55,
+            bottom=0.40 if groupby == "ZMAP_Tissue" else 0.55,
             width=0.22,
-            height=0.10,
+            height=0.20 if groupby == "ZMAP_Tissue" else 0.10,
             background=background,
         )
 
@@ -1274,7 +1325,7 @@ def gene_groups_vs_time_and_studies(
     size_legend_title: str | None = None,
     size_legend_facecolor: str = "black",
     # ===== ordering & filtering =====
-    cluster_order: list[str] | None = DEFAULT_CLUSTER_ORDER_ZMAP_CellType,
+    cluster_order: list[str] | None = None,
     time_order: list[str] | None = None,
     study_order: list[str] | None = DEFAULT_STUDY_ORDER,
     omit_groups: list[str] | None = ['nan', 'unknown'],
@@ -1289,10 +1340,10 @@ def gene_groups_vs_time_and_studies(
     tick_grid_alpha: float = 0.15,
     tick_grid_lw: float = 0.6,
     # ===== Row color group mapping & legend =====
-    row_color_groups: dict[str, list[str]] | None = DEFAULT_ROW_COLOR_GROUPS_ZMAP_CellType,
+    row_color_groups: dict[str, list[str]] | None = None,
     show_row_color_legend: bool = False,
     # ===== Horizontal split lines between rows =====
-    row_dividers: list[int] | None = DEFAULT_ROW_DIVIDERS_ZMAP_CellType,
+    row_dividers: list[int] | None = None,
     row_divider_color: str = "black",
     row_divider_lw: float = 0.5,
     row_divider_alpha: float = 1.0,
@@ -1393,6 +1444,20 @@ def gene_groups_vs_time_and_studies(
     >>> zmap.dotplot.gene_view(adata_ref, "myod1", cmap="Reds", vmax=5)
     """
     color = str(color)
+
+    # Select defaults based on grouping
+    if groupby not in ("ZMAP_CellType", "ZMAP_Tissue"):
+        raise ValueError("groupby must be 'ZMAP_CellType' or 'ZMAP_Tissue'")
+
+    if cluster_order is None:
+        cluster_order = globals()[f"DEFAULT_CLUSTER_ORDER_{groupby}"]
+    if row_color_groups is None:
+        row_color_groups = globals()[f"DEFAULT_ROW_COLOR_GROUPS_{groupby}"]
+    if row_dividers is None:
+        row_dividers = globals()[f"DEFAULT_ROW_DIVIDERS_{groupby}"]
+    
+    if figsize is None and groupby == "ZMAP_Tissue":
+        figsize = (4, 5)
 
     # ------------------------ color vector ------------------------
     x_full, color_source = _extract_color_vector(adata, color, layer, use_raw)
@@ -1664,7 +1729,7 @@ def gene_groups_vs_time_and_studies(
 
     # ------------------------ SHARED colorbar in gutter + rotated label -----
     if add_colorbar:
-        left_cb = 1.0 - gutter_pad - 0.12
+        left_cb = 1.0 - gutter_pad - 0.06
         bottom_cb = 0.70
         width_cb = 0.02
         height_cb = 0.15
@@ -1702,9 +1767,9 @@ def gene_groups_vs_time_and_studies(
             size_legend_title=size_legend_title,
             size_legend_facecolor=size_legend_facecolor,
             left=1.0 - gutter_pad - 0.14,
-            bottom=0.55,
-            width=0.12,
-            height=0.10,
+            bottom=0.40 if groupby == "ZMAP_Tissue" else 0.55,
+            width=0.22,
+            height=0.20 if groupby == "ZMAP_Tissue" else 0.10,
             background=background,
         )
 
